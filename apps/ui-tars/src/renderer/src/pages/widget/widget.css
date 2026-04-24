@@ -1,0 +1,46 @@
+/**
+ * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+/*
+ * Widget window mouse pass-through styles.
+ *
+ * The widget window uses setIgnoreMouseEvents(true, { forward: true }) on the
+ * main process side. This means the renderer's CSS pointer-events determine
+ * which areas capture clicks and which let them pass through:
+ *   - pointer-events: none  → click passes through to the application below
+ *   - pointer-events: auto  → click is captured by this window element
+ *
+ * Strategy: make the entire widget transparent to clicks by default, then
+ * selectively enable click capture on interactive elements (buttons).
+ */
+html, body, #root {
+  pointer-events: none;
+}
+
+/* Re-enable click capture on interactive button elements only */
+button,
+Button,
+[role="button"],
+button *,
+Button * {
+  pointer-events: auto;
+}
+
+.hide_scroll_bar::-webkit-scrollbar {
+  display: none;
+}
+
+.loader-icon {
+  animation: spin 2s linear infinite;
+  color: #9ca3af;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
