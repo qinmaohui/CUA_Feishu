@@ -35,6 +35,7 @@ import { FREE_MODEL_BASE_URL } from '../remote/shared';
 import { getAuthHeader } from '../remote/auth';
 import { ProxyClient } from '../remote/proxyClient';
 import { UITarsModelConfig } from '@ui-tars/sdk/core';
+import { getAccessibilityTree, getTreeSummary } from './getDom';
 
 export const runAgent = async (
   setState: (state: AppState) => void,
@@ -55,6 +56,26 @@ export const runAgent = async (
     const lastConv = getState().messages[getState().messages.length - 1];
     const { status, conversations, ...restUserData } = data;
     logger.info('[onGUIAgentData] status', status, conversations.length);
+
+    // 每次截图操作时获取无障碍树并打印
+    if (
+      conversations.length > 0 &&
+      conversations[conversations.length - 1].screenshotBase64
+    ) {
+      try {
+        logger.info('[getDom] 正在获取飞书无障碍树...');
+        const axTree = await getAccessibilityTree('Feishu');
+        const summary = getTreeSummary(axTree);
+        logger.info('[getDom] 无障碍树获取成功:\n', summary);
+        console.log('========================================');
+        console.log('📊 飞书无障碍树摘要:');
+        console.log(summary);
+        console.log('========================================');
+      } catch (e) {
+        logger.error('[getDom] 获取无障碍树失败:', e);
+        console.error('❌ 获取无障碍树失败:', e);
+      }
+    }
 
     // add SoM to conversations
     const conversationsWithSoM: ConversationWithSoM[] = await Promise.all(

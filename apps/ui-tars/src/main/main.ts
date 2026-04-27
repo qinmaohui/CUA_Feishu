@@ -30,6 +30,7 @@ import { registerSettingsHandlers } from './services/settings';
 import { sanitizeState } from './utils/sanitizeState';
 import { windowManager } from './services/windowManager';
 import { checkBrowserAvailability } from './services/browserCheck';
+// import { testGetDom } from './services/getDom';
 
 const { isProd } = env;
 
@@ -229,6 +230,11 @@ app
     await initializeApp();
 
     logger.info('app.whenReady end');
+
+    // // Test: fetch DOM snapshot and accessibility tree from Feishu
+    // testGetDom().catch((err) => {
+    //   logger.error('[getDom] testGetDom failed:', err);
+    // });
   })
 
   .catch(console.log);
