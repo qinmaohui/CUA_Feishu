@@ -1,11 +1,10 @@
 /**
- * Get the Accessibility Tree from Feishu via Windows UI Automation API.
+ * Get the Accessibility Tree from Feishu via IAccessible (MSAA).
  *
- * FIXED v4: 切换至 UIA3 COM API (与 Accessibility Insights 底层一致)
- * 1. 弃用 .NET System.Windows.Automation (对 Chromium 兼容性差)
- * 2. 使用 New-Object -ComObject UIAutomationClient.CUIAutomation
- * 3. 采用 RawViewWalker 直接遍历，绕过 Chromium 的懒加载过滤
- * 4. 保留 SetForegroundWindow + SendKeys 唤醒机制
+ * Feishu uses a custom Electron fork (frame.dll) that does NOT expose a UIA provider.
+ * WM_GETOBJECT(UIA_OBJID) returns 0, but WM_GETOBJECT(OBJID_CLIENT) returns a valid
+ * IAccessible object. We compile a small C# helper at runtime to walk the IAccessible
+ * tree, which avoids PowerShell's cross-process COM marshaling issues.
  */
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -45,18 +44,163 @@ export interface AccessibilityTreeResult {
 }
 
 // ---------------------------------------------------------------------------
-// PowerShell Script - UIA3 COM API (Matches Accessibility Insights)
+// C# source for the IAccessible walker helper
+// Compiled at runtime via csc.exe, cached by hash so it's only built once.
+// ---------------------------------------------------------------------------
+
+const CSHARP_SOURCE = `
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Diagnostics;
+using System.Windows.Automation;
+
+class FeishuAccWalker {
+    [DllImport("oleacc.dll")]
+    static extern int AccessibleObjectFromWindow(IntPtr hwnd, uint dwId,
+        ref Guid riid, [MarshalAs(UnmanagedType.Interface)] out object ppvObject);
+
+    static readonly Guid IID_IAccessible = new Guid("618736E0-3C3D-11CF-810C-00AA00389B71");
+    const uint OBJID_CLIENT = 0xFFFFFFFC;
+    const int MAX_NODES = 10000;
+
+    static int total = 0;
+    static List<string> jsonLines = new List<string>();
+
+    static void Main(string[] args) {
+        Console.OutputEncoding = Encoding.UTF8;
+        string procName = args.Length > 0 ? args[0] : "Feishu";
+
+        var procs = Process.GetProcessesByName(procName);
+        if (procs.Length == 0) procs = Process.GetProcessesByName("Lark");
+        if (procs.Length == 0) { Console.Error.WriteLine("ERR:Process not found"); return; }
+
+        Process mainProc = null;
+        foreach (var p in procs) if (p.MainWindowHandle != IntPtr.Zero) { mainProc = p; break; }
+        if (mainProc == null) { Console.Error.WriteLine("ERR:No main window"); return; }
+
+        string windowTitle = mainProc.MainWindowTitle;
+        var win = AutomationElement.FromHandle(mainProc.MainWindowHandle);
+        var walker = TreeWalker.RawViewWalker;
+
+        // Walk all Chrome_RenderWidgetHostHWND children
+        var cur = walker.GetFirstChild(win);
+        while (cur != null) {
+            if (cur.Current.ClassName == "Chrome_RenderWidgetHostHWND") {
+                var hwnd = (IntPtr)cur.Current.NativeWindowHandle;
+                var iid = IID_IAccessible;
+                object accObj;
+                if (AccessibleObjectFromWindow(hwnd, OBJID_CLIENT, ref iid, out accObj) == 0 && accObj != null) {
+                    Walk(accObj, 0, -1);
+                }
+            }
+            cur = walker.GetNextSibling(cur);
+        }
+
+        Console.WriteLine("WINDOW_TITLE:" + windowTitle);
+        Console.WriteLine("NODES_JSON:[" + string.Join(",", jsonLines) + "]");
+        Console.WriteLine("TOTAL_NODES:" + total);
+    }
+
+    static void Walk(dynamic acc, int childId, int parentIdx) {
+        if (total >= MAX_NODES) return;
+        int myIdx = total++;
+        try {
+            string name = "";
+            int role = 0;
+            int childCount = 0;
+            int x = 0, y = 0, w = 0, h = 0;
+            bool enabled = true;
+
+            try { name = (acc.accName(childId) ?? "").ToString().Replace("\\\\", "\\\\\\\\").Replace("\\"", "\\\\\\"").Replace("\\n", " ").Replace("\\r", ""); } catch {}
+            try { role = Convert.ToInt32(acc.accRole(childId)); } catch {}
+            try { acc.accLocation(out x, out y, out w, out h, childId); } catch {}
+            if (childId == 0) { try { childCount = acc.accChildCount; } catch {} }
+            try {
+                object state = acc.accState(childId);
+                int stateInt = Convert.ToInt32(state);
+                enabled = (stateInt & 0x00000001) == 0; // STATE_SYSTEM_UNAVAILABLE = 1
+            } catch {}
+
+            bool offscreen = (x < -9999 || y < -9999 || w <= 0 || h <= 0);
+            string rectJson = (w > 0 && h > 0 && !offscreen)
+                ? "{\\"left\\":" + x + ",\\"top\\":" + y + ",\\"width\\":" + w + ",\\"height\\":" + h + "}"
+                : "null";
+
+            string controlType = RoleToControlType(role);
+            jsonLines.Add(
+                "{\\"index\\":" + myIdx +
+                ",\\"parentIndex\\":" + parentIdx +
+                ",\\"controlType\\":\\"" + controlType + "\\"" +
+                ",\\"name\\":\\"" + name + "\\"" +
+                ",\\"boundingRectangle\\":" + rectJson +
+                ",\\"isEnabled\\":" + (enabled ? "true" : "false") +
+                ",\\"isOffscreen\\":" + (offscreen ? "true" : "false") +
+                ",\\"value\\":\\"\\"" +
+                ",\\"helpText\\":\\"\\"" +
+                ",\\"automationId\\":\\"\\"" +
+                ",\\"className\\":\\"\\"" +
+                ",\\"frameworkId\\":\\"Chrome\\"" +
+                ",\\"childCount\\":" + childCount +
+                ",\\"localizedControlType\\":\\"" + controlType.ToLower() + "\\"" +
+                ",\\"isKeyboardFocusable\\":false}"
+            );
+
+            for (int i = 1; i <= childCount && total < MAX_NODES; i++) {
+                try {
+                    dynamic child = acc.accChild(i);
+                    if (child != null) Walk(child, 0, myIdx);
+                    else Walk(acc, i, myIdx);
+                } catch {}
+            }
+        } catch {}
+    }
+
+    static string RoleToControlType(int role) {
+        switch (role) {
+            case 9:  return "Button";
+            case 10: return "CheckBox";
+            case 11: return "RadioButton";
+            case 42: return "ComboBox";
+            case 15: return "Pane";
+            case 20: return "Group";
+            case 21: return "Edit";
+            case 25: return "ListItem";
+            case 33: return "MenuItem";
+            case 35: return "MenuBar";
+            case 36: return "ScrollBar";
+            case 40: return "TabItem";
+            case 41: return "Text";
+            case 43: return "Image";
+            case 44: return "Hyperlink";
+            case 45: return "Spinner";
+            case 46: return "ScrollBar";
+            case 47: return "ToolBar";
+            case 48: return "StatusBar";
+            case 49: return "Table";
+            case 50: return "ColumnHeader";
+            case 51: return "RowHeader";
+            case 52: return "DataItem";
+            case 53: return "DataGrid";
+            case 54: return "Document";
+            case 56: return "Window";
+            default: return "Custom";
+        }
+    }
+}
+`;
+
+// ---------------------------------------------------------------------------
+// PowerShell bootstrap: compile C# once, then run it
 // ---------------------------------------------------------------------------
 
 const POWERSHELL_SCRIPT = `param(
   [string]$ProcessName = "Feishu",
-  [switch]$EnableDebug = $true
+  [switch]$EnableDebug
 )
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-Add-Type -AssemblyName UIAutomationTypes
-Add-Type -AssemblyName UIAutomationClient
-Add-Type -AssemblyName System.Windows.Forms
 
 function Write-DebugLog {
     param([string]$Message)
@@ -64,177 +208,100 @@ function Write-DebugLog {
 }
 
 try {
-    Write-DebugLog "Starting Hybrid UIA fetch for: $ProcessName"
-
-    # 1. 查找进程
-    $procs = Get-Process -Name $ProcessName -ErrorAction SilentlyContinue
-    if (-not $procs) { $procs = Get-Process -Name "Lark" -ErrorAction SilentlyContinue }
-    if (-not $procs) { 
-        Write-Error "Process '$ProcessName' or 'Lark' not found."
-        exit 1 
+    # 1. Locate csc.exe
+    $csc = "C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe"
+    if (-not (Test-Path $csc)) {
+        $csc = Get-ChildItem "C:\\Windows\\Microsoft.NET\\Framework64" -Filter "csc.exe" -Recurse -ErrorAction SilentlyContinue |
+               Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
     }
-    $targetPid = [int]$procs[0].Id
-    Write-DebugLog "Target PID: $targetPid"
+    if (-not $csc) { Write-Error "csc.exe not found"; exit 1 }
+    Write-DebugLog "csc: $csc"
 
-    # 2. 获取根元素
-    $root = [System.Windows.Automation.AutomationElement]::RootElement
-    
-    # 3. 定位主窗口 (使用 ProcessIdProperty)
-    $propCond = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::ProcessIdProperty, 
-        $targetPid
-    )
-    
-    # 先找所有桌面子窗口，过滤出目标进程的窗口
-    $desktopChildren = $root.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)
-    $win = $null
-    
-    foreach ($c in $desktopChildren) {
-        if ([int]$c.Current.ProcessId -eq $targetPid) {
-            # 进一步过滤名称，确保是主窗口
-            if ($c.Current.Name -match "飞书|Feishu|Lark" -and $c.Current.BoundingRectangle.Width -gt 0) {
-                $win = $c
-                break
-            }
+    # 2. Locate UIA assemblies
+    $gac = "C:\\Windows\\Microsoft.NET\\assembly\\GAC_MSIL"
+    $r1 = (Get-ChildItem "$gac\\UIAutomationClient" -Filter "*.dll" -Recurse | Select-Object -First 1).FullName
+    $r2 = (Get-ChildItem "$gac\\UIAutomationTypes"  -Filter "*.dll" -Recurse | Select-Object -First 1).FullName
+    $r3 = (Get-ChildItem "$gac\\WindowsBase"        -Filter "*.dll" -Recurse | Select-Object -First 1).FullName
+    Write-DebugLog "refs: $r1 | $r2 | $r3"
+
+    # 3. Write C# source and compile (cache exe by source hash)
+    $tmpDir = [System.IO.Path]::GetTempPath()
+    $csPath  = [System.IO.Path]::Combine($tmpDir, "FeishuAccWalker.cs")
+    $exePath = [System.IO.Path]::Combine($tmpDir, "FeishuAccWalker.exe")
+
+    $csSource = @'
+CSHARP_SOURCE_PLACEHOLDER
+'@
+
+    # Only recompile if source changed
+    $needCompile = $true
+    if (Test-Path $exePath) {
+        $hashFile = $exePath + ".hash"
+        $newHash = [System.Security.Cryptography.MD5]::Create().ComputeHash(
+            [System.Text.Encoding]::UTF8.GetBytes($csSource)) | ForEach-Object { $_.ToString("x2") }
+        $newHash = $newHash -join ""
+        if ((Test-Path $hashFile) -and (Get-Content $hashFile) -eq $newHash) {
+            $needCompile = $false
+            Write-DebugLog "Using cached exe (hash match)"
+        } else {
+            $newHash | Out-File $hashFile -Encoding ASCII -NoNewline
         }
     }
 
-    if (-not $win) {
-        Write-Error "Main window not found for PID $targetPid."
-        exit 1
-    }
-    
-    $windowTitle = $win.Current.Name
-    Write-DebugLog "Found window: '$windowTitle'"
-
-    # 4. 唤醒 Chromium A11y 桥 (关键步骤)
-    try {
-        $hwnd = $win.Current.NativeWindowHandle
-        if ($hwnd -ne 0) {
-            Write-DebugLog "Bringing window to foreground..."
-            [System.Windows.Forms.SendKeys]::SendWait("{F6}")
-            Start-Sleep -Milliseconds 300
-            
-            Write-DebugLog "Sending TAB keys to trigger A11y bridge..."
-            for ($i = 0; $i -lt 4; $i++) {
-                [System.Windows.Forms.SendKeys]::SendWait("{TAB}")
-                Start-Sleep -Milliseconds 400
-            }
-            
-            Write-DebugLog "Waiting for Chromium to build tree (3s)..."
-            Start-Sleep -Milliseconds 3000
+    if ($needCompile) {
+        Write-DebugLog "Compiling C# walker..."
+        [System.IO.File]::WriteAllText($csPath, $csSource, [System.Text.Encoding]::UTF8)
+        $compileOut = & $csc /nologo /out:$exePath /reference:$r1 /reference:$r2 /reference:$r3 $csPath 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Compile failed: $compileOut"
+            exit 1
         }
-    } catch {
-        Write-DebugLog "Trigger warning: $_"
+        Write-DebugLog "Compiled OK"
     }
 
-    # 5. 使用 RawViewWalker 遍历 (绕过 ControlView 的过滤)
-    $walker = [System.Windows.Automation.TreeWalker]::RawViewWalker
-    $queue = New-Object System.Collections.Queue
-    $nodes = New-Object System.Collections.ArrayList
-    $globalIdx = 0
-    $maxNodes = 10000
+    # 4. Run the walker
+    Write-DebugLog "Running walker for: $ProcessName"
+    $output = & $exePath $ProcessName 2>&1
+    $stdout = ($output | Where-Object { $_ -notmatch "^ERR:" }) -join [char]10
+    $stderr = ($output | Where-Object { $_ -match "^ERR:" }) -join [char]10
 
-    # 初始入队
-    $queue.Enqueue(@{ el = $win; pIdx = -1 })
-    
-    while ($queue.Count -gt 0 -and $nodes.Count -lt $maxNodes) {
-        $item = $queue.Dequeue()
-        $el = $item.el
-        $pIdx = $item.pIdx
+    if ($stderr) { Write-DebugLog "Walker stderr: $stderr" }
 
-        try {
-            # 强制更新缓存，确保获取最新属性
-            $el.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern) | Out-Null
-            
-            $br = $el.Current.BoundingRectangle
-            $rect = if ($br.Width -gt 0) {
-                @{ left = [math]::Round($br.X); top = [math]::Round($br.Y); width = [math]::Round($br.Width); height = [math]::Round($br.Height) }
-            } else { $null }
-
-            $info = @{
-                index = $globalIdx
-                parentIndex = $pIdx
-                controlType = $el.Current.ControlType.ProgrammaticName
-                name = $el.Current.Name
-                className = $el.Current.ClassName
-                frameworkId = $el.Current.FrameworkId
-                automationId = $el.Current.AutomationId
-                helpText = $el.Current.HelpText
-                value = ""
-                localizedControlType = $el.Current.LocalizedControlType
-                isEnabled = $el.Current.IsEnabled
-                isOffscreen = $el.Current.IsOffscreen
-                isKeyboardFocusable = $el.Current.IsKeyboardFocusable
-                boundingRectangle = $rect
-                childCount = 0
-            }
-            
-            # 尝试获取 ValuePattern
-            try {
-                $vp = $el.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-                if ($vp) { $info.value = $vp.Current.Value }
-            } catch {}
-
-            [void]$nodes.Add($info)
-
-            # 获取子节点
-            $child = $walker.GetFirstChild($el)
-            $childCount = 0
-            while ($child -ne $null -and $nodes.Count -lt $maxNodes) {
-                $childCount++
-                $globalIdx++
-                $queue.Enqueue(@{ el = $child; pIdx = $globalIdx })
-                $child = $walker.GetNextSibling($child)
-            }
-            $info.childCount = $childCount
-        } catch {
-            Write-DebugLog "Node error: $_"
-        }
-    }
-
-    Write-DebugLog "Total nodes collected: $($nodes.Count)"
-
-    # 6. 输出结果
-    $json = $nodes | ConvertTo-Json -Depth 10 -Compress
-    Write-Output "WINDOW_TITLE:$windowTitle"
-    Write-Output "NODES_JSON:$json"
-    Write-Output "TOTAL_NODES:$($nodes.Count)"
+    # 5. Pass through the walker output
+    Write-Output $stdout
 
 } catch {
-    Write-Error "Fatal Error: $_"
+    Write-Error "Fatal: $_"
     exit 1
 }
 `;
 
 // ---------------------------------------------------------------------------
-// Core Functions (保持原有解析逻辑不变)
+// Core Functions
 // ---------------------------------------------------------------------------
 
 export async function getAccessibilityTree(
   processName: string = 'Feishu',
   options?: {
-    maxRetries?: number;
-    retryDelayMs?: number;
     enableDebug?: boolean;
   },
 ): Promise<AccessibilityTreeResult> {
-  const opts = options ?? {};
-  const maxRetries = opts.maxRetries ?? 3;
-  const retryDelayMs = opts.retryDelayMs ?? 2000;
-  const enableDebug = opts.enableDebug ?? true;
+  const enableDebug = options?.enableDebug ?? true;
 
-  logger.info(`[getDom] Running UIA3 COM fetch for: ${processName}`, {
-    maxRetries,
-    retryDelayMs,
-  });
+  logger.info(`[getDom] Running IAccessible fetch for: ${processName}`);
 
   const { writeFile, unlink } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
 
-  const scriptPath = join(tmpdir(), `uia3-com-${Date.now()}.ps1`);
-  await writeFile(scriptPath, '\uFEFF' + POWERSHELL_SCRIPT, 'utf-8');
+  // Embed the C# source into the PowerShell script
+  const script = POWERSHELL_SCRIPT.replace(
+    'CSHARP_SOURCE_PLACEHOLDER',
+    CSHARP_SOURCE.trim(),
+  );
+
+  const scriptPath = join(tmpdir(), `feishu-acc-${Date.now()}.ps1`);
+  await writeFile(scriptPath, '﻿' + script, 'utf-8');
 
   try {
     const { stdout, stderr } = await execFileAsync(
@@ -248,10 +315,6 @@ export async function getAccessibilityTree(
         scriptPath,
         '-ProcessName',
         processName,
-        '-MaxRetries',
-        maxRetries.toString(),
-        '-RetryDelayMs',
-        retryDelayMs.toString(),
         ...(enableDebug ? ['-EnableDebug'] : []),
       ],
       { timeout: 90000, maxBuffer: 100 * 1024 * 1024, windowsHide: true },
@@ -260,13 +323,12 @@ export async function getAccessibilityTree(
     if (stderr && enableDebug) {
       const debugLines = stderr.split('\n').filter((l) => l.includes('DEBUG:'));
       if (debugLines.length)
-        logger.debug('[getDom] COM Debug:', debugLines.slice(0, 15));
+        logger.debug('[getDom] Debug:', debugLines.slice(0, 20).join('\n'));
     }
 
     return parsePowerShellOutput(stdout, processName, enableDebug);
   } catch (error: any) {
-    if (error.code === 'ETIMEDOUT')
-      logger.error('[getDom] COM script timed out');
+    if (error.code === 'ETIMEDOUT') logger.error('[getDom] Script timed out');
     throw error;
   } finally {
     await unlink(scriptPath).catch(() => {});
@@ -300,10 +362,7 @@ function parsePowerShellOutput(
 
   if (!nodesJson) {
     throw new Error(
-      `No NODES_JSON found. Debug:\n${output
-        .split('\n')
-        .filter((l) => l.includes('DEBUG:'))
-        .join('\n')}`,
+      `No NODES_JSON found. Output:\n${output.split('\n').slice(0, 20).join('\n')}`,
     );
   }
 
@@ -430,30 +489,17 @@ export function getTreeSummary(result: AccessibilityTreeResult): string {
 }
 
 export async function testGetDom(): Promise<void> {
-  logger.info('[getDom] ========================================');
-  logger.info(
-    '[getDom] Starting enhanced UI Automation fetch (Chromium Optimized)',
-  );
-  logger.info('[getDom] ========================================');
-
+  logger.info('[getDom] Starting IAccessible fetch test...');
   let result: AccessibilityTreeResult;
   try {
-    result = await getAccessibilityTree('Feishu', {
-      maxRetries: 2,
-      retryDelayMs: 2000,
-      useControlViewWalker: false, // 关键：使用 RawViewWalker
-      enableDebug: true,
-    });
+    result = await getAccessibilityTree('Feishu', { enableDebug: true });
   } catch (err) {
     logger.error('[getDom] Failed:', err);
     return;
   }
-
   console.log(getTreeSummary(result));
   if (result.totalNodes < 50) {
-    console.warn(
-      '\n⚠️ Still few nodes. Ensure: 1. Feishu is foreground 2. Not minimized 3. Try manually pressing Tab in Feishu before running.',
-    );
+    console.warn('\n⚠️ Few nodes. Ensure Feishu is running and not minimized.');
   }
   logger.info('[getDom] Done!');
 }
