@@ -4,7 +4,7 @@
 
 基于 [UI-TARS-desktop](https://github.com/bytedance/UI-TARS-desktop) 构建，通过 Vision-Language Model 驱动自然语言指令，实现对飞书客户端的自动化操控。
 
-[English](./README.md) | [简体中文](./README.zh-CN.md)
+[简体中文](./README.md)
 
 ## 项目简介
 
@@ -75,6 +75,8 @@ CUA_Feishu/
 
 - **Widget 窗口鼠标穿透**：通过 `setIgnoreMouseEvents(true, { forward: true })` + CSS `pointer-events` 分层控制，实现控制面板窗口的点击穿透，避免遮挡 Agent 操作目标
 - **Overlay 标记窗口优化**：在 Agent 执行动作时临时隐藏预测标记窗口，确保点击不被干扰
+- **无障碍树采集**：新增 `getDom` 服务，定时抓取飞书窗口的 Accessibility Tree 并写入本地日志，为后续数据分析提供基础
+- **飞书UI自动标注**：新增完整的 LLM 粗标注 + 人工矫正流程，Agent 每次截图时自动触发 VLM 对飞书界面进行 UI 元素识别，标注结果持久化存储；前端新增 `/annotation` 标注页面，支持树形结构浏览、元素编辑矫正，可用于构建高质量飞书 UI 数据集
 
 ## License
 
