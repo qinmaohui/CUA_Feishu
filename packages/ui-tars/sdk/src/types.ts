@@ -29,7 +29,10 @@ export interface ExecuteParams {
   factors: Factors;
 }
 
-export type ExecuteOutput = { status: StatusEnum } & (object | void);
+export type ExecuteOutput = { status: StatusEnum; observation?: string } & (
+  | object
+  | void
+);
 
 export interface ScreenshotOutput extends ScreenshotResult {}
 
@@ -70,6 +73,8 @@ export abstract class Operator extends BaseOperator {
   };
   abstract screenshot(): Promise<ScreenshotOutput>;
   abstract execute(params: ExecuteParams): Promise<ExecuteOutput>;
+  /** Optional: return a compressed accessibility tree snapshot to inject into each loop turn. */
+  getA11ySnapshot?(): Promise<string>;
 }
 
 export abstract class Model extends BaseModel<InvokeParams, InvokeOutput> {

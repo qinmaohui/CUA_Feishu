@@ -6,6 +6,7 @@ import { initIpc } from '@ui-tars/electron-ipc/main';
 import { StatusEnum, Conversation, Message } from '@ui-tars/shared/types';
 import { store } from '@main/store/create';
 import { runAgent } from '@main/services/runAgent';
+import { queryAccessibilityTree } from '@main/services/getDom';
 import { showWindow } from '@main/window/index';
 
 import { closeScreenMarker } from '@main/window/ScreenMarker';
@@ -101,6 +102,17 @@ export const agentRoute = t.router({
     .input<{ messages: Message[] }>()
     .handle(async ({ input }) => {
       store.setState({ sessionHistoryMessages: input.messages });
+    }),
+  queryA11yTree: t.procedure
+    .input<{
+      query?: string;
+      controlType?: string;
+      isVisible?: boolean;
+      isEnabled?: boolean;
+      limit?: number;
+    }>()
+    .handle(async ({ input }) => {
+      return await queryAccessibilityTree(input);
     }),
   clearHistory: t.procedure.input<void>().handle(async () => {
     store.setState({

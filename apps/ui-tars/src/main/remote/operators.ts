@@ -15,6 +15,10 @@ import { RemoteBrowserOperator } from '@ui-tars/operator-browser';
 
 import { logger } from '@main/logger';
 import { sleep } from '@ui-tars/shared/utils';
+import {
+  queryAccessibilityTree,
+  formatA11yQueryObservation,
+} from '@main/services/getDom';
 import { BaseRemoteComputer } from './shared';
 import { ProxyClient, RemoteComputer, SandboxInfo } from './proxyClient';
 import { SubsRemoteComputer } from './subscriptionClient';
@@ -29,6 +33,7 @@ export class RemoteComputerOperator extends Operator {
       `hotkey(key='')`,
       `type(content='') #If you want to submit your input, use "\\n" at the end of \`content\`.`,
       `scroll(start_box='[x1, y1, x2, y2]', direction='down or up or right or left')`,
+      `query_a11y_tree(query='', control_type='', is_visible='true|false|', is_enabled='true|false|', limit='') #Reference-only: query accessibility tree to locate candidate controls before click/type.`,
       `wait() #Sleep for 5s and take a screenshot to check for any changes.`,
       `finished()`,
       `call_user() # Submit the task and call the user when the task is unsolvable, or when you need the user's help.`,
@@ -170,6 +175,32 @@ export class RemoteComputerOperator extends Operator {
     };
 
     switch (action_type) {
+      case 'query_a11y_tree': {
+        const ai = action_inputs as Partial<Record<string, string>>;
+        const rawVisible = ai.is_visible?.trim();
+        const rawEnabled = ai.is_enabled?.trim();
+        const rawLimit = ai.limit?.trim();
+        const result = await queryAccessibilityTree({
+          query: ai.query?.trim() || undefined,
+          controlType: ai.control_type?.trim() || undefined,
+          isVisible:
+            rawVisible === 'true'
+              ? true
+              : rawVisible === 'false'
+                ? false
+                : undefined,
+          isEnabled:
+            rawEnabled === 'true'
+              ? true
+              : rawEnabled === 'false'
+                ? false
+                : undefined,
+          limit: rawLimit ? Number.parseInt(rawLimit, 10) : undefined,
+        });
+        logger.info('[a11y-query]\n' + formatA11yQueryObservation(result));
+        break;
+      }
+
       case 'wait':
         logger.info('[RemoteComputerOperator] wait', action_inputs);
         await sleep(5000);

@@ -17,6 +17,7 @@ import { logger } from '@main/logger';
 import { sleep } from '@ui-tars/shared/utils';
 import { getScreenSize } from '@main/utils/screen';
 import { hideOverlay, showOverlay } from '@main/window/ScreenMarker';
+import { queryAccessibilityTree } from '@main/services/getDom';
 
 export class NutJSElectronOperator extends NutJSOperator {
   static MANUAL = {
@@ -33,6 +34,16 @@ export class NutJSElectronOperator extends NutJSOperator {
       `call_user() # Submit the task and call the user when the task is unsolvable, or when you need the user's help.`,
     ],
   };
+
+  async getA11ySnapshot(): Promise<string> {
+    const { physicalSize, scaleFactor } = getScreenSize();
+    const result = await queryAccessibilityTree(
+      {},
+      { width: physicalSize.width, height: physicalSize.height, scaleFactor },
+    );
+    logger.info('[a11y-snapshot] total=' + result.totalNodes);
+    return result.extraction.extractionText;
+  }
 
   public async screenshot(): Promise<ScreenshotOutput> {
     const {

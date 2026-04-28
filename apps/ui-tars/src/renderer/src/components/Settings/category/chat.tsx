@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from '@renderer/components/ui/select';
 import { Input } from '@renderer/components/ui/input';
+import { Switch } from '@renderer/components/ui/switch';
 
 const formSchema = z.object({
   language: z.enum(['en', 'zh']),
@@ -158,6 +159,20 @@ export function ChatSettings() {
               </FormItem>
             )}
           />
+          <FormItem className="flex items-center justify-between rounded-lg border p-3">
+            <div>
+              <FormLabel>自动标注</FormLabel>
+              <FormDescription>
+                每次截图后自动对飞书界面进行 UI 标注
+              </FormDescription>
+            </div>
+            <Switch
+              checked={!!settings.autoAnnotation}
+              onCheckedChange={(checked) =>
+                updateSetting({ ...settings, autoAnnotation: checked } as any)
+              }
+            />
+          </FormItem>
         </form>
       </Form>
     </>

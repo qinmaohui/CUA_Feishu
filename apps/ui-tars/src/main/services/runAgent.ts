@@ -35,8 +35,8 @@ import { FREE_MODEL_BASE_URL } from '../remote/shared';
 import { getAuthHeader } from '../remote/auth';
 import { ProxyClient } from '../remote/proxyClient';
 import { UITarsModelConfig } from '@ui-tars/sdk/core';
-import { getAccessibilityTree, getTreeSummary } from './getDom';
 import { runAutoAnnotation } from './feishuAnnotation';
+import { resetTaskA11yContext } from './getDom';
 
 export const runAgent = async (
   setState: (state: AppState) => void,
@@ -83,6 +83,7 @@ export const runAgent = async (
 
     // 每次截图时执行飞书UI自动标注（异步执行，不阻塞主流程）
     if (
+      settings.autoAnnotation &&
       conversations.length > 0 &&
       conversations[conversations.length - 1].screenshotBase64
     ) {
@@ -242,11 +243,21 @@ export const runAgent = async (
     modelVersion = await ProxyClient.getRemoteVLMProvider();
   }
 
-  const systemPrompt = getSpByModelVersion(
-    modelVersion,
-    language,
-    operatorType,
-  );
+  const a11yGuidance = `
+## Accessibility Tree Context
+Before each response, a fresh [A11Y_CONTEXT] snapshot is injected listing visible, enabled UI controls.
+Each entry includes precomputed click targets:
+  - norm=(x,y)
+  - point1000=<point>NNN NNN</point>
+
+When deciding where to click or type:
+1. If the target appears in [A11Y_CONTEXT], copy its point1000 value directly and use it in click(point='...').
+2. Do not re-calculate or re-derive coordinates from rect/norm.
+3. Only if the target is missing from [A11Y_CONTEXT], fall back to screenshot-based estimation.
+`;
+
+  const systemPrompt =
+    getSpByModelVersion(modelVersion, language, operatorType) + a11yGuidance;
 
   const guiAgent = new GUIAgent({
     model: modelConfig,
@@ -290,6 +301,7 @@ export const runAgent = async (
   const { sessionHistoryMessages } = getState();
 
   beforeAgentRun(settings.operator);
+  resetTaskA11yContext();
 
   const startTime = Date.now();
 
@@ -307,4 +319,5 @@ export const runAgent = async (
   logger.info('[runAgent Totoal cost]: ', (Date.now() - startTime) / 1000, 's');
 
   afterAgentRun(settings.operator);
+  resetTaskA11yContext();
 };

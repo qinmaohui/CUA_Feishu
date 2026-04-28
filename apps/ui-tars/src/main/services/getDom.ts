@@ -8,6 +8,9 @@
  */
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { appendFile, mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
+import { app } from 'electron';
 import { logger } from '@main/logger';
 
 const execFileAsync = promisify(execFile);
@@ -113,7 +116,7 @@ class FeishuAccWalker {
             int x = 0, y = 0, w = 0, h = 0;
             bool enabled = true;
 
-            try { name = (acc.accName(childId) ?? "").ToString().Replace("\\\\", "\\\\\\\\").Replace("\\"", "\\\\\\"").Replace("\\n", " ").Replace("\\r", ""); } catch {}
+            try { name = (acc.accName(childId) ?? "").ToString().Replace("\\\\", "\\\\\\\\").Replace("\"", "\\\"").Replace("\\n", " ").Replace("\\r", ""); } catch {}
             try { role = Convert.ToInt32(acc.accRole(childId)); } catch {}
             try { acc.accLocation(out x, out y, out w, out h, childId); } catch {}
             if (childId == 0) { try { childCount = acc.accChildCount; } catch {} }
@@ -443,6 +446,339 @@ export function filterNodes(
   });
 }
 
+export interface QueryA11yTreeInput {
+  query?: string;
+  controlType?: string;
+  isVisible?: boolean;
+  isEnabled?: boolean;
+  limit?: number;
+}
+
+export interface ScreenSize {
+  /** physical screen width */
+  width: number;
+  /** physical screen height */
+  height: number;
+  scaleFactor: number;
+}
+
+export interface A11yContextSummary {
+  namedNodeCount: number;
+  visibleEnabledCount: number;
+  controlTypeTop: Array<{ type: string; count: number }>;
+  namedInteractiveTop: Array<{
+    controlType: string;
+    name: string;
+    rect: string;
+    enabled: boolean;
+    offscreen: boolean;
+  }>;
+}
+
+export interface A11yTreeDiffSummary {
+  addedCount: number;
+  removedCount: number;
+  changedCount: number;
+  addedTop: string[];
+  removedTop: string[];
+  changedTop: string[];
+}
+
+export interface A11yContextExtraction {
+  extractionText: string;
+  summary: A11yContextSummary;
+  diff: A11yTreeDiffSummary | null;
+}
+
+export interface QueryA11yTreeResult {
+  snapshotTimestamp: string;
+  processName: string;
+  windowTitle: string;
+  totalNodes: number;
+  matchedCount: number;
+  nodes: AXNode[];
+  allNodes: AXNode[];
+  extraction: A11yContextExtraction;
+}
+
+let taskA11yContext: {
+  generation: number;
+  lastNodes: AXNode[];
+  summary: A11yContextSummary;
+  extractionText: string;
+  updatedAt: string;
+} | null = null;
+
+let contextGeneration = 0;
+
+// ---------------------------------------------------------------------------
+// Rule-based extraction — no LLM dependency
+// ---------------------------------------------------------------------------
+
+const CLICKABLE_TYPES = new Set(['Button', 'Hyperlink', 'MenuItem', 'TabItem']);
+const INPUT_TYPES = new Set(['Edit', 'ComboBox']);
+const SELECTABLE_TYPES = new Set(['CheckBox', 'RadioButton', 'ListItem']);
+
+function toRect(node: AXNode): string {
+  if (!node.boundingRectangle) return 'no-rect';
+  const r = node.boundingRectangle;
+  return `${r.left},${r.top},${r.width}x${r.height}`;
+}
+
+function nodeSignature(node: AXNode): string {
+  return `${node.controlType}|${node.name}|${toRect(node)}|${node.isEnabled}|${node.isOffscreen}`;
+}
+
+function getNodeKey(node: AXNode): string {
+  return `${node.controlType}|${node.name}|${toRect(node)}|${node.parentIndex}`;
+}
+
+/** Keep only visible, enabled, named nodes of a given type set */
+function pickNodes(
+  nodes: AXNode[],
+  types: Set<string>,
+  limit: number,
+): AXNode[] {
+  return nodes
+    .filter(
+      (n) =>
+        types.has(n.controlType) &&
+        n.name.trim() &&
+        !n.isOffscreen &&
+        n.isEnabled,
+    )
+    .slice(0, limit);
+}
+
+function formatNode(n: AXNode, screenSize?: ScreenSize): string {
+  let base = `[${n.controlType}] "${n.name}" rect=${toRect(n)}`;
+  if (screenSize && n.boundingRectangle) {
+    const r = n.boundingRectangle;
+    const nx = (r.left + r.width / 2) / screenSize.width;
+    const ny = (r.top + r.height / 2) / screenSize.height;
+    const x1000 = Math.max(1, Math.min(999, Math.round(nx * 1000)));
+    const y1000 = Math.max(1, Math.min(999, Math.round(ny * 1000)));
+    base += ` norm=(${nx.toFixed(3)},${ny.toFixed(3)}) point1000=<point>${x1000} ${y1000}</point>`;
+  }
+  return base;
+}
+
+function buildExtractionText(
+  nodes: AXNode[],
+  diff: A11yTreeDiffSummary | null,
+  screenSize?: ScreenSize,
+): string {
+  const visible = nodes.filter((n) => !n.isOffscreen && n.isEnabled);
+  const typeMap = new Map<string, number>();
+  for (const n of visible)
+    typeMap.set(n.controlType, (typeMap.get(n.controlType) ?? 0) + 1);
+  const typeStats = Array.from(typeMap.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([t, c]) => `${t}:${c}`)
+    .join(' ');
+
+  const clickable = pickNodes(nodes, CLICKABLE_TYPES, 40);
+  const inputs = pickNodes(nodes, INPUT_TYPES, 20);
+  const selectable = pickNodes(nodes, SELECTABLE_TYPES, 20);
+
+  const header = screenSize
+    ? `[A11Y_CONTEXT] total=${nodes.length} visible_enabled=${visible.length} types=${typeStats} screen=${Math.round(screenSize.width)}x${Math.round(screenSize.height)} scale=${screenSize.scaleFactor} sample_norm_check=use_norm_directly`
+    : `[A11Y_CONTEXT] total=${nodes.length} visible_enabled=${visible.length} types=${typeStats}`;
+
+  const lines: string[] = [header];
+
+  if (inputs.length) {
+    lines.push('## 输入框');
+    inputs.forEach((n) => lines.push('  ' + formatNode(n, screenSize)));
+  }
+
+  if (clickable.length) {
+    lines.push('## 可点击元素');
+    clickable.forEach((n) => lines.push('  ' + formatNode(n, screenSize)));
+  }
+
+  if (selectable.length) {
+    lines.push('## 可选择元素');
+    selectable.forEach((n) => lines.push('  ' + formatNode(n, screenSize)));
+  }
+
+  if (diff) {
+    const hasChanges =
+      diff.addedCount + diff.removedCount + diff.changedCount > 0;
+    if (hasChanges) {
+      lines.push(
+        `## 变化 (+${diff.addedCount} -${diff.removedCount} ~${diff.changedCount})`,
+      );
+      diff.addedTop.slice(0, 15).forEach((r) => lines.push(`  + ${r}`));
+      diff.removedTop.slice(0, 15).forEach((r) => lines.push(`  - ${r}`));
+      diff.changedTop.slice(0, 15).forEach((r) => lines.push(`  ~ ${r}`));
+    }
+  }
+
+  return lines.join('\n');
+}
+
+function summarizeNodes(nodes: AXNode[]): A11yContextSummary {
+  const namedNodes = nodes.filter((n) => n.name.trim().length > 0);
+  const visibleEnabledCount = nodes.filter(
+    (n) => !n.isOffscreen && n.isEnabled,
+  ).length;
+
+  const typeMap = new Map<string, number>();
+  for (const n of nodes)
+    typeMap.set(n.controlType, (typeMap.get(n.controlType) ?? 0) + 1);
+
+  const controlTypeTop = Array.from(typeMap.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 12)
+    .map(([type, count]) => ({ type, count }));
+
+  const allInteractive = new Set([
+    ...CLICKABLE_TYPES,
+    ...INPUT_TYPES,
+    ...SELECTABLE_TYPES,
+  ]);
+  const namedInteractiveTop = nodes
+    .filter((n) => allInteractive.has(n.controlType) && n.name.trim())
+    .map((n) => ({
+      controlType: n.controlType,
+      name: n.name,
+      rect: toRect(n),
+      enabled: n.isEnabled,
+      offscreen: n.isOffscreen,
+    }));
+
+  return {
+    namedNodeCount: namedNodes.length,
+    visibleEnabledCount,
+    controlTypeTop,
+    namedInteractiveTop,
+  };
+}
+
+function summarizeDiff(
+  prevNodes: AXNode[],
+  currNodes: AXNode[],
+): A11yTreeDiffSummary {
+  const prevMap = new Map<string, AXNode>();
+  const currMap = new Map<string, AXNode>();
+
+  const allInteractive = new Set([
+    ...CLICKABLE_TYPES,
+    ...INPUT_TYPES,
+    ...SELECTABLE_TYPES,
+  ]);
+  // Only diff interactive named nodes to avoid noise from unnamed Pane/Custom churn
+  const keep = (n: AXNode) =>
+    allInteractive.has(n.controlType) && n.name.trim();
+
+  for (const n of prevNodes) if (keep(n)) prevMap.set(getNodeKey(n), n);
+  for (const n of currNodes) if (keep(n)) currMap.set(getNodeKey(n), n);
+
+  const added: string[] = [];
+  const removed: string[] = [];
+  const changed: string[] = [];
+
+  for (const [key, curr] of currMap) {
+    const prev = prevMap.get(key);
+    if (!prev) {
+      added.push(formatNode(curr));
+      continue;
+    }
+    if (nodeSignature(prev) !== nodeSignature(curr))
+      changed.push(formatNode(curr));
+  }
+  for (const [key, prev] of prevMap) {
+    if (!currMap.has(key)) removed.push(formatNode(prev));
+  }
+
+  return {
+    addedCount: added.length,
+    removedCount: removed.length,
+    changedCount: changed.length,
+    addedTop: added.slice(0, 30),
+    removedTop: removed.slice(0, 30),
+    changedTop: changed.slice(0, 30),
+  };
+}
+
+function extractA11yContext(
+  allNodes: AXNode[],
+  screenSize?: ScreenSize,
+): A11yContextExtraction {
+  const summary = summarizeNodes(allNodes);
+  const diff = taskA11yContext
+    ? summarizeDiff(taskA11yContext.lastNodes, allNodes)
+    : null;
+  const extractionText = buildExtractionText(allNodes, diff, screenSize);
+
+  taskA11yContext = {
+    generation: ++contextGeneration,
+    lastNodes: allNodes,
+    summary,
+    extractionText,
+    updatedAt: new Date().toISOString(),
+  };
+
+  return { extractionText, summary, diff };
+}
+
+export function resetTaskA11yContext(): void {
+  taskA11yContext = null;
+  contextGeneration = 0;
+}
+
+export async function queryAccessibilityTree(
+  input: QueryA11yTreeInput,
+  screenSize?: ScreenSize,
+): Promise<QueryA11yTreeResult> {
+  const tree = await getAccessibilityTree('Feishu', { enableDebug: false });
+  const timestamp = new Date().toISOString();
+  const limit = Math.max(1, Math.min(input.limit ?? 20, 120));
+  const filtered = filterNodes(tree.nodes, {
+    controlType: input.controlType,
+    nameContains: input.query,
+    isEnabled: input.isEnabled,
+    isVisible: input.isVisible,
+  });
+
+  const extraction = extractA11yContext(tree.nodes, screenSize);
+
+  return {
+    snapshotTimestamp: timestamp,
+    processName: tree.processName,
+    windowTitle: tree.windowTitle,
+    totalNodes: tree.totalNodes,
+    matchedCount: filtered.length,
+    nodes: filtered.slice(0, limit),
+    allNodes: tree.nodes,
+    extraction,
+  };
+}
+
+export function formatA11yQueryObservation(
+  result: QueryA11yTreeResult,
+): string {
+  const lines: string[] = [
+    `A11Y_QUERY_RESULT matched=${result.matchedCount}/${result.totalNodes}`,
+    `window="${result.windowTitle}" ts=${result.snapshotTimestamp}`,
+  ];
+
+  for (const n of result.nodes) {
+    const rect = n.boundingRectangle
+      ? `${n.boundingRectangle.left},${n.boundingRectangle.top},${n.boundingRectangle.width}x${n.boundingRectangle.height}`
+      : 'no-rect';
+    lines.push(
+      `- [${n.controlType}] name="${n.name}" enabled=${n.isEnabled} offscreen=${n.isOffscreen} rect=${rect}`,
+    );
+  }
+
+  lines.push('');
+  lines.push(result.extraction.extractionText);
+
+  return lines.join('\n');
+}
+
 export function getTreeSummary(result: AccessibilityTreeResult): string {
   const lines: string[] = [
     `=== Accessibility Tree for "${result.windowTitle}" (process: ${result.processName}) ===`,
@@ -486,6 +822,70 @@ export function getTreeSummary(result: AccessibilityTreeResult): string {
     lines.push(`  ${node.controlType}: "${node.name}" ${rect}`);
   }
   return lines.join('\n');
+}
+
+export interface A11yQueryLogEntry {
+  timestamp: string;
+  thought: string;
+  reflection: string | null;
+  query: QueryA11yTreeInput;
+  result: {
+    windowTitle: string;
+    totalNodes: number;
+    matchedCount: number;
+    nodes: AXNode[];
+    allNodes: AXNode[];
+    extraction: A11yContextExtraction;
+  };
+}
+
+export async function logA11yQuery(entry: A11yQueryLogEntry): Promise<void> {
+  // Human-readable log for immediate review
+  const queryDesc = [
+    entry.query.query ? `query="${entry.query.query}"` : '',
+    entry.query.controlType ? `type=${entry.query.controlType}` : '',
+    entry.query.isVisible !== undefined
+      ? `visible=${entry.query.isVisible}`
+      : '',
+    entry.query.isEnabled !== undefined
+      ? `enabled=${entry.query.isEnabled}`
+      : '',
+    `limit=${entry.query.limit ?? 20}`,
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  logger.info(
+    `[a11y-log] ===== A11Y QUERY =====\n` +
+      `  Thought   : ${entry.thought || '(none)'}\n` +
+      `  Reflection: ${entry.reflection || '(none)'}\n` +
+      `  Query     : ${queryDesc}\n` +
+      `  Result    : matched=${entry.result.matchedCount}/${entry.result.totalNodes} window="${entry.result.windowTitle}"\n` +
+      entry.result.nodes
+        .map((n) => {
+          const r = n.boundingRectangle;
+          const rect = r
+            ? `[${r.left},${r.top} ${r.width}x${r.height}]`
+            : '[no-rect]';
+          return `    - [${n.controlType}] "${n.name}" enabled=${n.isEnabled} ${rect}`;
+        })
+        .join('\n') +
+      `\n  Extraction:\n${entry.result.extraction.extractionText
+        .split('\n')
+        .map((l) => `    ${l}`)
+        .join('\n')}`,
+  );
+
+  // Structured JSONL file for retrospective analysis
+  try {
+    // app.getAppPath() → apps/ui-tars，上两级为项目根目录
+    const logDir = join(app.getAppPath(), '..', '..', 'logs');
+    await mkdir(logDir, { recursive: true });
+    const logPath = join(logDir, 'a11y-query-log.jsonl');
+    await appendFile(logPath, JSON.stringify(entry) + '\n', 'utf-8');
+  } catch (e) {
+    logger.error('[a11y-log] Failed to write log file:', e);
+  }
 }
 
 export async function testGetDom(): Promise<void> {

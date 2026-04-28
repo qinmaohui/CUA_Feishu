@@ -37,7 +37,6 @@ import {
   readAnnotationImage,
   llmAnnotateUI,
 } from './services/feishuAnnotation';
-import { getAccessibilityTree } from './services/getDom';
 
 const { isProd } = env;
 
@@ -276,32 +275,6 @@ app
     await initializeApp();
 
     logger.info('app.whenReady end');
-
-    // 每 10 秒获取一次飞书无障碍树，追加写入日志
-    const { appendFile, mkdir } = await import('node:fs/promises');
-    const { join } = await import('node:path');
-    const dataDir = join(app.getAppPath(), '..', '..', 'data');
-    const logPath = join(dataDir, 'getDomLog.jsonl');
-    await mkdir(dataDir, { recursive: true });
-
-    const runDomCapture = async () => {
-      try {
-        const result = await getAccessibilityTree('Feishu', {
-          enableDebug: false,
-        });
-        const entry = JSON.stringify({
-          timestamp: new Date().toISOString(),
-          ...result,
-        });
-        await appendFile(logPath, entry + '\n', 'utf-8');
-        logger.info(`[getDom] Logged ${result.totalNodes} nodes`);
-      } catch (err) {
-        logger.error('[getDom] Capture failed:', err);
-      }
-    };
-
-    runDomCapture();
-    setInterval(runDomCapture, 10_000);
   })
 
   .catch(console.log);

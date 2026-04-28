@@ -237,6 +237,30 @@ export class GUIAgent<T extends Operator> extends BaseGUIAgent<
           });
         }
 
+        // Auto-inject accessibility snapshot if the operator supports it.
+        // This runs every loop so the LLM always has fresh UI context.
+        if (operator.getA11ySnapshot) {
+          const a11yText = await operator.getA11ySnapshot().catch((e) => {
+            logger.error('[GUIAgent] getA11ySnapshot error', e);
+            return null;
+          });
+          if (a11yText) {
+            logger.info(
+              '[GUIAgent] A11Y snapshot injected, len=',
+              a11yText.length,
+            );
+            logger.info(
+              '[GUIAgent] A11Y preview:\n' +
+                a11yText.split('\n').slice(0, 12).join('\n'),
+            );
+            data.conversations.push({
+              from: 'human',
+              value: a11yText,
+              timing: { start: Date.now(), end: Date.now(), cost: 0 },
+            });
+          }
+        }
+
         // conversations -> messages, images
         const modelFormat = toVlmModelFormat({
           historyMessages: historyMessages || [],

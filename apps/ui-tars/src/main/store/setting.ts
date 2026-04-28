@@ -28,6 +28,7 @@ export const DEFAULT_SETTING: LocalStore = {
   loopIntervalInMs: 1000,
   searchEngineForBrowser: SearchEngineForSettings.GOOGLE,
   operator: Operator.LocalComputer,
+  autoAnnotation: false,
   reportStorageBaseUrl: '',
   utioBaseUrl: '',
 };
