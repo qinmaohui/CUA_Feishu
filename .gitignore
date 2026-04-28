@@ -13,3 +13,5 @@ scripts/merge-yml/*.yml
 .claude/
 .tarko
 .mcp*_token
+/data
+/apps/ui-tars/data/feishuImages
