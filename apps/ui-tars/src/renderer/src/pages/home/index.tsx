@@ -222,30 +222,27 @@ const Home = () => {
               </Button>
             </CardFooter>
           </Card>
-          {/* <Card className="w-[400px] py-5">
+          <Card className="w-[400px] py-5">
             <CardHeader className="px-5">
-              <CardTitle>Browser Operator</CardTitle>
+              <CardTitle>飞书UI自动标注</CardTitle>
               <CardDescription>
-                Let the UI-TARS model help you automate browser tasks, from
-                navigating pages to filling out forms.
+                自动识别飞书界面UI元素，结合LLM智能标注和人工矫正，构建高质量飞书UI数据集。
               </CardDescription>
             </CardHeader>
             <CardContent className="px-5">
-              <img
-                src={browserUseImg}
-                alt=""
-                className="w-full h-full aspect-video object-fill rounded-lg"
-              />
+              <div className="w-full h-full aspect-video rounded-lg bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+                <span className="text-4xl">✈️</span>
+              </div>
             </CardContent>
             <CardFooter className="gap-3 px-5 flex justify-between">
               <Button
-                onClick={() => handleLocalPress(Operator.LocalBrowser)}
+                onClick={() => navigate('/annotation')}
                 className="w-full"
               >
-                Use Local Browser
+                进入标注页面
               </Button>
             </CardFooter>
-          </Card> */}
+          </Card>
         </div>
         <LocalSettingsDialog
           isOpen={localConfig.open}

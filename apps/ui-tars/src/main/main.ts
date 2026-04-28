@@ -30,7 +30,14 @@ import { registerSettingsHandlers } from './services/settings';
 import { sanitizeState } from './utils/sanitizeState';
 import { windowManager } from './services/windowManager';
 import { checkBrowserAvailability } from './services/browserCheck';
-// import { testGetDom } from './services/getDom';
+import {
+  readAnnotationData,
+  writeAnnotationData,
+  listAnnotationImages,
+  readAnnotationImage,
+  llmAnnotateUI,
+} from './services/feishuAnnotation';
+import { getAccessibilityTree } from './services/getDom';
 
 const { isProd } = env;
 
@@ -197,6 +204,45 @@ const registerIPCHandlers = (
   });
 
   registerSettingsHandlers();
+
+  // 标注数据相关IPC接口
+  ipcMain.handle('annotation:read', async () => {
+    return await readAnnotationData();
+  });
+
+  ipcMain.handle('annotation:write', async (_, data) => {
+    await writeAnnotationData(data);
+    return { success: true };
+  });
+
+  ipcMain.handle('annotation:listImages', async () => {
+    return await listAnnotationImages();
+  });
+
+  ipcMain.handle('annotation:getImage', async (_, filename: string) => {
+    return await readAnnotationImage(filename);
+  });
+
+  ipcMain.handle(
+    'annotation:annotate',
+    async (
+      _,
+      screenshotPath: string,
+      screenshotInfo: { width: number; height: number; scaleFactor: number },
+    ) => {
+      const base64 = await readAnnotationImage(screenshotPath);
+      if (!base64) throw new Error('无法读取截图文件');
+      // base64 is a data URL like "data:image/jpeg;base64,..."
+      const raw = base64.replace(/^data:[^;]+;base64,/, '');
+      const result = await llmAnnotateUI(
+        raw,
+        screenshotInfo.width,
+        screenshotInfo.height,
+      );
+      return result;
+    },
+  );
+
   // register ipc services routes
   registerIpcMain(ipcRoutes);
 
@@ -231,10 +277,31 @@ app
 
     logger.info('app.whenReady end');
 
-    // // Test: fetch DOM snapshot and accessibility tree from Feishu
-    // testGetDom().catch((err) => {
-    //   logger.error('[getDom] testGetDom failed:', err);
-    // });
+    // 每 10 秒获取一次飞书无障碍树，追加写入日志
+    const { appendFile, mkdir } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const dataDir = join(app.getAppPath(), '..', '..', 'data');
+    const logPath = join(dataDir, 'getDomLog.jsonl');
+    await mkdir(dataDir, { recursive: true });
+
+    const runDomCapture = async () => {
+      try {
+        const result = await getAccessibilityTree('Feishu', {
+          enableDebug: false,
+        });
+        const entry = JSON.stringify({
+          timestamp: new Date().toISOString(),
+          ...result,
+        });
+        await appendFile(logPath, entry + '\n', 'utf-8');
+        logger.info(`[getDom] Logged ${result.totalNodes} nodes`);
+      } catch (err) {
+        logger.error('[getDom] Capture failed:', err);
+      }
+    };
+
+    runDomCapture();
+    setInterval(runDomCapture, 10_000);
   })
 
   .catch(console.log);

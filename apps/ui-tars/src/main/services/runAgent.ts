@@ -36,6 +36,7 @@ import { getAuthHeader } from '../remote/auth';
 import { ProxyClient } from '../remote/proxyClient';
 import { UITarsModelConfig } from '@ui-tars/sdk/core';
 import { getAccessibilityTree, getTreeSummary } from './getDom';
+import { runAutoAnnotation } from './feishuAnnotation';
 
 export const runAgent = async (
   setState: (state: AppState) => void,
@@ -58,6 +59,8 @@ export const runAgent = async (
     logger.info('[onGUIAgentData] status', status, conversations.length);
 
     // 每次截图操作时获取无障碍树并打印
+    // TODO: 无障碍树功能暂时搁置，后续恢复时取消注释
+    /*
     if (
       conversations.length > 0 &&
       conversations[conversations.length - 1].screenshotBase64
@@ -75,6 +78,36 @@ export const runAgent = async (
         logger.error('[getDom] 获取无障碍树失败:', e);
         console.error('❌ 获取无障碍树失败:', e);
       }
+    }
+    */
+
+    // 每次截图时执行飞书UI自动标注（异步执行，不阻塞主流程）
+    if (
+      conversations.length > 0 &&
+      conversations[conversations.length - 1].screenshotBase64
+    ) {
+      // 异步执行标注，无需等待结果
+      (async () => {
+        try {
+          logger.info('[FeishuAnnotation] 开始飞书UI自动标注...');
+          const currentConv = conversations[conversations.length - 1];
+          if (currentConv.screenshotBase64 && currentConv.screenshotContext) {
+            // 使用Agent已有的截图，避免重复截取
+            await runAutoAnnotation({
+              base64: currentConv.screenshotBase64,
+              width: currentConv.screenshotContext.size.width,
+              height: currentConv.screenshotContext.size.height,
+              scaleFactor: currentConv.screenshotContext.scaleFactor || 1,
+            });
+          } else {
+            // 没有现有截图时自行截取
+            await runAutoAnnotation();
+          }
+          logger.info('[FeishuAnnotation] 飞书UI自动标注完成');
+        } catch (e) {
+          logger.error('[FeishuAnnotation] 飞书UI自动标注失败:', e);
+        }
+      })();
     }
 
     // add SoM to conversations

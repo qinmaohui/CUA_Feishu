@@ -16,6 +16,7 @@ const FreeRemoteOperator = lazy(() => import('./pages/remote/free'));
 // const PaidRemoteOperator = lazy(() => import('./pages/remote/paid'));
 
 const Widget = lazy(() => import('./pages/widget'));
+const Annotation = lazy(() => import('./pages/annotation'));
 
 export default function App() {
   return (
@@ -36,6 +37,7 @@ export default function App() {
           </Route>
 
           <Route path="/widget" element={<Widget />} />
+          <Route path="/annotation" element={<Annotation />} />
         </Routes>
         <Toaster
           position="top-right"
