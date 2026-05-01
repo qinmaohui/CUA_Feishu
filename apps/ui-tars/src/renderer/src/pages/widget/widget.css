@@ -27,6 +27,35 @@ Button * {
   pointer-events: auto;
 }
 
+.shortcut-panel {
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 180px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(156, 163, 175, 0.45);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.shortcut-label {
+  color: #6b7280;
+}
+
+.shortcut-key {
+  color: #111827;
+  font-weight: 600;
+}
+
 .hide_scroll_bar::-webkit-scrollbar {
   display: none;
 }

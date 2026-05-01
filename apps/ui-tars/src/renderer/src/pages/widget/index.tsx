@@ -3,25 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { useStore } from '@renderer/hooks/useStore';
-import {
-  Monitor,
-  Globe,
-  Pause,
-  Play,
-  Square,
-  Loader,
-  MousePointerClick,
-} from 'lucide-react';
+import { Monitor, Globe, MousePointerClick } from 'lucide-react';
 import { ActionIconMap } from '@renderer/const/actions';
 import { useSetting } from '@renderer/hooks/useSetting';
+import { StatusEnum } from '@ui-tars/sdk';
 
 import logo from '@resources/logo-full.png?url';
-import { Button } from '@renderer/components/ui/button';
-import { useCallback, useEffect, useState } from 'react';
-import { api } from '@renderer/api';
+import { useEffect, useState } from 'react';
 
 import './widget.css';
-import { StatusEnum } from '@ui-tars/sdk';
 
 // https://developer.mozilla.org/en-US/docs/Web/API/Navigator/platform
 // chrome 93 support
@@ -116,32 +106,53 @@ const Widget = () => {
     setActions(ac);
   }, [messages.length]);
 
-  const [isPaused, setIsPaused] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const toDisplayShortcut = (shortcut?: string) => {
+    if (!shortcut) return '';
 
-  useEffect(() => {
-    if (status === StatusEnum.PAUSE && isLoading) {
-      setIsLoading(false);
-      setIsPaused(true);
+    return shortcut
+      .split('+')
+      .map((part) => {
+        const key = part.trim();
+        if (key === 'CommandOrControl') {
+          return isWin ? 'Ctrl' : '⌘';
+        }
+        if (key === 'Control') {
+          return 'Ctrl';
+        }
+        if (key === 'Escape') {
+          return 'Esc';
+        }
+        return key;
+      })
+      .join('+');
+  };
+
+  const pauseShortcut =
+    toDisplayShortcut(settings.pauseShortcut) || (isWin ? 'Ctrl+P' : '⌘+P');
+  const stopShortcut =
+    toDisplayShortcut(settings.stopShortcut) || (isWin ? 'Ctrl+Esc' : '⌘+Esc');
+
+  const statusMeta = (() => {
+    switch (status) {
+      case StatusEnum.RUNNING:
+        return { label: 'Running', dotClass: 'bg-emerald-500 animate-pulse' };
+      case StatusEnum.PAUSE:
+        return { label: 'Paused', dotClass: 'bg-amber-400' };
+      case StatusEnum.CALL_USER:
+        return {
+          label: 'Waiting for input',
+          dotClass: 'bg-sky-400 animate-pulse',
+        };
+      case StatusEnum.ERROR:
+        return { label: 'Error', dotClass: 'bg-red-500' };
+      case StatusEnum.END:
+      case StatusEnum.USER_STOPPED:
+        return { label: 'Stopped', dotClass: 'bg-gray-400' };
+      case StatusEnum.INIT:
+      default:
+        return { label: 'Ready', dotClass: 'bg-gray-400' };
     }
-  }, [status, isLoading]);
-
-  const handlePlayPauseClick = useCallback(async () => {
-    if (isLoading) return;
-
-    if (isPaused) {
-      await api.resumeRun();
-      setIsPaused(false);
-    } else {
-      await api.pauseRun();
-      setIsLoading(true);
-    }
-  }, [isPaused]);
-
-  const handleStop = useCallback(async () => {
-    await api.stopRun();
-    await api.clearHistory();
-  }, []);
+  })();
 
   return (
     <div
@@ -156,6 +167,13 @@ const Widget = () => {
           {getOperatorIcon(currentOperator)}
           {getOperatorLabel(currentOperator)}
         </div>
+      </div>
+
+      <div className="mt-2 mb-1 flex items-center gap-2 text-xs text-gray-600">
+        <span
+          className={['h-2 w-2 rounded-full', statusMeta.dotClass].join(' ')}
+        />
+        <span>Agent status: {statusMeta.label}</span>
       </div>
 
       {!!errorMsg && <div>{errorMsg}</div>}
@@ -223,29 +241,15 @@ const Widget = () => {
           })}
         </div>
       )}
-      <div className="absolute bottom-4 right-4 flex gap-2">
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={handlePlayPauseClick}
-          className="h-8 w-8 border-gray-400 hover:border-gray-500 bg-white/50 hover:bg-white/60"
-        >
-          {isLoading ? (
-            <Loader className="h-4 w-4 loader-icon" />
-          ) : isPaused ? (
-            <Play className="h-4 w-4" />
-          ) : (
-            <Pause className="h-4 w-4" />
-          )}
-        </Button>
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={handleStop}
-          className="h-8 w-8 text-red-400 border-red-400 bg-white/50 hover:bg-red-50/80 hover:text-red-500"
-        >
-          <Square className="h-4 w-4 text-red-500" />
-        </Button>
+      <div className="absolute bottom-4 right-4 shortcut-panel">
+        <div className="shortcut-row">
+          <span className="shortcut-label">Pause</span>
+          <span className="shortcut-key">{pauseShortcut}</span>
+        </div>
+        <div className="shortcut-row">
+          <span className="shortcut-label">Stop</span>
+          <span className="shortcut-key">{stopShortcut}</span>
+        </div>
       </div>
     </div>
   );
