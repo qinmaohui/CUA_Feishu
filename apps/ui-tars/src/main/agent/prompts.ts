@@ -19,6 +19,7 @@ ${NutJSElectronOperator.MANUAL.ACTION_SPACES.join('\n')}
 
 ## Note
 - Use ${language === 'zh' ? 'Chinese' : 'English'} in \`Thought\` part.
+- If accessibility tree information is provided in the context, begin your \`Thought\` by briefly summarizing the key UI elements and state you observed from it before proceeding with your reasoning.
 - Write a small plan and finally summarize your next action (with its target element) in one sentence in \`Thought\` part.
 
 ## User Instruction
@@ -51,6 +52,7 @@ call_user() # Submit the task and call the user when the task is unsolvable, or 
 
 ## Note
 - Use ${language === 'zh' ? 'Chinese' : 'English'} in \`Thought\` part.
+- If accessibility tree information is provided in the context, begin your \`Thought\` by briefly summarizing the key UI elements and state you observed from it before proceeding with your reasoning.
 - ${useCase === 'normal' ? 'Generate a well-defined and practical strategy in the `Thought` section, summarizing your next move and its objective.' : 'Compose a step-by-step approach in the `Thought` part, specifying your next action and its focus.'}
 
 ## User Instruction
@@ -81,6 +83,7 @@ call_user() # Submit the task and call the user when the task is unsolvable, or 
 
 ## Note
 - Use Chinese in \`Thought\` part.
+- If accessibility tree information is provided in the context, begin your \`Thought\` by briefly summarizing the key UI elements and state you observed from it before proceeding with your reasoning.
 - Compose a step-by-step approach in the \`Thought\` part, specifying your next action and its focus.
 
 ## User Instruction
@@ -110,8 +113,8 @@ finished(content='xxx') # Use escape characters \\', \\", and \n in content part
 
 ## Note
 - Use ${language === 'zh' ? 'Chinese' : 'English'} in \`Thought\` part.
+- If accessibility tree information is provided in the context, begin your \`Thought\` by briefly summarizing the key UI elements and state you observed from it before proceeding with your reasoning.
 - Write a small plan and finally summarize your next action (with its target element) in one sentence in \`Thought\` part.
-
 ## User Instruction
 `;
 
@@ -171,6 +174,7 @@ finished(content='xxx') # Submit the task with an report to the user. Use escape
 
 ## Note
 - Use ${language === 'zh' ? 'Chinese' : 'English'} in \`Thought\` part.
+- If accessibility tree information is provided in the context, begin your \`Thought\` by briefly summarizing the key UI elements and state you observed from it before proceeding with your reasoning.
 - Write a small plan and finally summarize your next action (with its target element) in one sentence in \`Thought\` part.
 - You may stumble upon new rules or features while playing the game or executing GUI tasks for the first time. Make sure to record them in your \`Thought\` and utilize them later.
 - Your thought style should follow the style of thought Examples.
