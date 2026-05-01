@@ -2,7 +2,7 @@
  * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as z from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
@@ -27,10 +27,93 @@ import {
 import { Input } from '@renderer/components/ui/input';
 import { Switch } from '@renderer/components/ui/switch';
 
+// @ts-ignore
+const isWin = navigator.userAgentData?.platform === 'Windows';
+
+function toDisplayShortcut(shortcut: string): string {
+  if (!shortcut) return '';
+  return shortcut
+    .split('+')
+    .map((part) => {
+      const k = part.trim();
+      if (k === 'CommandOrControl') return isWin ? 'Ctrl' : '⌘';
+      if (k === 'Control') return 'Ctrl';
+      if (k === 'Escape') return 'Esc';
+      return k;
+    })
+    .join('+');
+}
+
+interface ShortcutRecorderProps {
+  value: string;
+  onChange: (value: string) => void;
+}
+
+function ShortcutRecorder({ value, onChange }: ShortcutRecorderProps) {
+  const [recording, setRecording] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (e.key === 'Escape') {
+      setRecording(false);
+      return;
+    }
+
+    if (['Control', 'Meta', 'Alt', 'Shift'].includes(e.key)) {
+      return;
+    }
+
+    const parts: string[] = [];
+
+    if (e.ctrlKey || e.metaKey) {
+      parts.push('CommandOrControl');
+    }
+    if (e.altKey) parts.push('Alt');
+    if (e.shiftKey) parts.push('Shift');
+
+    if (parts.length === 0) return;
+
+    const key = e.key.length === 1 ? e.key.toUpperCase() : e.key;
+    parts.push(key);
+
+    onChange(parts.join('+'));
+    setRecording(false);
+  };
+
+  return (
+    <div
+      ref={ref}
+      tabIndex={0}
+      onKeyDown={handleKeyDown}
+      onBlur={() => setRecording(false)}
+      onClick={() => setRecording(true)}
+      className={[
+        'flex h-9 w-full rounded-md border px-3 py-1 text-sm cursor-pointer select-none items-center outline-none',
+        recording
+          ? 'border-primary ring-2 ring-ring/50 bg-accent text-accent-foreground'
+          : 'border-input bg-background hover:bg-accent/30',
+      ].join(' ')}
+    >
+      {recording ? (
+        <span className="text-muted-foreground">Press shortcut...</span>
+      ) : value ? (
+        <span>{toDisplayShortcut(value)}</span>
+      ) : (
+        <span className="text-muted-foreground">Click to set</span>
+      )}
+    </div>
+  );
+}
+
 const formSchema = z.object({
   language: z.enum(['en', 'zh']),
   maxLoopCount: z.number().min(25).max(200),
   loopIntervalInMs: z.number().min(0).max(3000),
+  pauseShortcut: z.string().min(1),
+  stopShortcut: z.string().min(1),
 });
 
 export function ChatSettings() {
@@ -42,13 +125,23 @@ export function ChatSettings() {
       language: undefined,
       maxLoopCount: 0,
       loopIntervalInMs: 1000,
+      pauseShortcut: 'CommandOrControl+P',
+      stopShortcut: 'CommandOrControl+Escape',
     },
   });
 
-  const [newLanguage, newCount, newInterval] = form.watch([
+  const [
+    newLanguage,
+    newCount,
+    newInterval,
+    newPauseShortcut,
+    newStopShortcut,
+  ] = form.watch([
     'language',
     'maxLoopCount',
     'loopIntervalInMs',
+    'pauseShortcut',
+    'stopShortcut',
   ]);
 
   useEffect(() => {
@@ -57,6 +150,8 @@ export function ChatSettings() {
         language: settings.language,
         maxLoopCount: settings.maxLoopCount,
         loopIntervalInMs: settings.loopIntervalInMs,
+        pauseShortcut: settings.pauseShortcut,
+        stopShortcut: settings.stopShortcut,
       });
     }
   }, [settings, form]);
@@ -65,7 +160,13 @@ export function ChatSettings() {
     if (!Object.keys(settings).length) {
       return;
     }
-    if (newLanguage === undefined && newCount === 0 && newInterval === 1000) {
+    if (
+      newLanguage === undefined &&
+      newCount === 0 &&
+      newInterval === 1000 &&
+      newPauseShortcut === 'CommandOrControl+P' &&
+      newStopShortcut === 'CommandOrControl+Escape'
+    ) {
       return;
     }
 
@@ -83,10 +184,28 @@ export function ChatSettings() {
       if (isIntervalValid && newInterval !== settings.loopIntervalInMs) {
         updateSetting({ ...settings, loopIntervalInMs: newInterval });
       }
+      const isPauseShortcutValid = await form.trigger('pauseShortcut');
+      if (isPauseShortcutValid && newPauseShortcut !== settings.pauseShortcut) {
+        updateSetting({ ...settings, pauseShortcut: newPauseShortcut });
+      }
+
+      const isStopShortcutValid = await form.trigger('stopShortcut');
+      if (isStopShortcutValid && newStopShortcut !== settings.stopShortcut) {
+        updateSetting({ ...settings, stopShortcut: newStopShortcut });
+      }
     };
 
     validAndSave();
-  }, [newLanguage, newCount, newInterval, settings, updateSetting, form]);
+  }, [
+    newLanguage,
+    newCount,
+    newInterval,
+    newPauseShortcut,
+    newStopShortcut,
+    settings,
+    updateSetting,
+    form,
+  ]);
 
   return (
     <>
@@ -159,11 +278,47 @@ export function ChatSettings() {
               </FormItem>
             )}
           />
+          <FormField
+            control={form.control}
+            name="pauseShortcut"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Pause Shortcut</FormLabel>
+                <FormDescription>Default: CommandOrControl+P</FormDescription>
+                <FormControl>
+                  <ShortcutRecorder
+                    value={field.value}
+                    onChange={field.onChange}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="stopShortcut"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Stop Shortcut</FormLabel>
+                <FormDescription>
+                  Default: CommandOrControl+Escape
+                </FormDescription>
+                <FormControl>
+                  <ShortcutRecorder
+                    value={field.value}
+                    onChange={field.onChange}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
           <FormItem className="flex items-center justify-between rounded-lg border p-3">
             <div>
-              <FormLabel>自动标注</FormLabel>
+              <FormLabel>Auto Annotation</FormLabel>
               <FormDescription>
-                每次截图后自动对飞书界面进行 UI 标注
+                Automatically annotate the Feishu UI after each screenshot
               </FormDescription>
             </div>
             <Switch

@@ -103,9 +103,11 @@ export const GlobalSettings = () => {
             </TabsContent>
 
             <TabsContent value="chat" className="mt-0">
-              <h2 className="text-xl font-semibold mb-3">Chat Settings</h2>
-              <Separator className="mb-4" />
-              <ChatSettings />
+              <ScrollArea className="h-[calc(80vh-48px)]">
+                <h2 className="text-xl font-semibold mb-3">Chat Settings</h2>
+                <Separator className="mb-4" />
+                <ChatSettings />
+              </ScrollArea>
             </TabsContent>
 
             <TabsContent value="operator" className="mt-0 flex-1">
