@@ -42,6 +42,47 @@ export class GUIAgentManager {
   }
 }
 
+export const triggerPauseRun = () => {
+  const guiAgent = GUIAgentManager.getInstance().getAgent();
+  if (guiAgent instanceof GUIAgent) {
+    guiAgent.pause();
+    store.setState({ status: StatusEnum.PAUSE, thinking: false });
+  }
+};
+
+export const triggerResumeRun = () => {
+  const guiAgent = GUIAgentManager.getInstance().getAgent();
+  if (guiAgent instanceof GUIAgent) {
+    guiAgent.resume();
+    store.setState({ status: StatusEnum.RUNNING, thinking: false });
+  }
+};
+
+export const triggerTogglePauseRun = () => {
+  const { status } = store.getState();
+  if (status === StatusEnum.PAUSE) {
+    triggerResumeRun();
+    return;
+  }
+  triggerPauseRun();
+};
+
+export const triggerStopRun = () => {
+  const { abortController } = store.getState();
+  store.setState({ status: StatusEnum.END, thinking: false });
+
+  showWindow();
+
+  abortController?.abort();
+  const guiAgent = GUIAgentManager.getInstance().getAgent();
+  if (guiAgent instanceof GUIAgent) {
+    guiAgent.resume();
+    guiAgent.stop();
+  }
+
+  closeScreenMarker();
+};
+
 export const agentRoute = t.router({
   runAgent: t.procedure.input<void>().handle(async () => {
     const { thinking } = store.getState();
@@ -60,33 +101,13 @@ export const agentRoute = t.router({
     store.setState({ thinking: false });
   }),
   pauseRun: t.procedure.input<void>().handle(async () => {
-    const guiAgent = GUIAgentManager.getInstance().getAgent();
-    if (guiAgent instanceof GUIAgent) {
-      guiAgent.pause();
-      store.setState({ thinking: false });
-    }
+    triggerPauseRun();
   }),
   resumeRun: t.procedure.input<void>().handle(async () => {
-    const guiAgent = GUIAgentManager.getInstance().getAgent();
-    if (guiAgent instanceof GUIAgent) {
-      guiAgent.resume();
-      store.setState({ thinking: false });
-    }
+    triggerResumeRun();
   }),
   stopRun: t.procedure.input<void>().handle(async () => {
-    const { abortController } = store.getState();
-    store.setState({ status: StatusEnum.END, thinking: false });
-
-    showWindow();
-
-    abortController?.abort();
-    const guiAgent = GUIAgentManager.getInstance().getAgent();
-    if (guiAgent instanceof GUIAgent) {
-      guiAgent.resume();
-      guiAgent.stop();
-    }
-
-    closeScreenMarker();
+    triggerStopRun();
   }),
   setInstructions: t.procedure
     .input<{ instructions: string }>()

@@ -6,6 +6,7 @@ import { ipcMain } from 'electron';
 import { SettingStore } from '../store/setting';
 import { logger } from '../logger';
 import { LocalStore } from '@main/store/validate';
+import { refreshWidgetShortcuts } from '@main/window/ScreenMarker';
 
 export function registerSettingsHandlers() {
   /**
@@ -33,7 +34,23 @@ export function registerSettingsHandlers() {
    * Update setting
    */
   ipcMain.handle('setting:update', async (_, settings: LocalStore) => {
+    const normalizeShortcut = (value?: string) =>
+      (value || '')
+        .trim()
+        .split('+')
+        .map((part) => part.trim().toLowerCase())
+        .filter(Boolean)
+        .join('+');
+
+    const pauseShortcut = normalizeShortcut(settings.pauseShortcut);
+    const stopShortcut = normalizeShortcut(settings.stopShortcut);
+
+    if (pauseShortcut && stopShortcut && pauseShortcut === stopShortcut) {
+      throw new Error('Pause and stop shortcuts must be different');
+    }
+
     SettingStore.setStore(settings);
+    refreshWidgetShortcuts();
   });
 
   /**

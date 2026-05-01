@@ -27,6 +27,8 @@ export const DEFAULT_SETTING: LocalStore = {
   maxLoopCount: 100,
   loopIntervalInMs: 1000,
   searchEngineForBrowser: SearchEngineForSettings.GOOGLE,
+  pauseShortcut: 'CommandOrControl+P',
+  stopShortcut: 'CommandOrControl+Escape',
   operator: Operator.LocalComputer,
   autoAnnotation: false,
   reportStorageBaseUrl: '',

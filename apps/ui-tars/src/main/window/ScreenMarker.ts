@@ -7,7 +7,7 @@
  * found in https://github.com/web-infra-dev/midscene/blob/main/LICENSE
  *
  */
-import { BrowserWindow, screen, app } from 'electron';
+import { BrowserWindow, screen, app, globalShortcut } from 'electron';
 
 import { PredictionParsed, Conversation } from '@ui-tars/shared/types';
 
@@ -19,6 +19,8 @@ import { setOfMarksOverlays } from '@main/shared/setOfMarks';
 import path from 'path';
 import MenuBuilder from '../menu';
 import { windowManager } from '../services/windowManager';
+import { SettingStore } from '@main/store/setting';
+import { triggerTogglePauseRun, triggerStopRun } from '@main/ipcRoutes/agent';
 
 let appUpdater;
 
@@ -27,6 +29,8 @@ class ScreenMarker {
   private currentOverlay: BrowserWindow | null = null;
   private widgetWindow: BrowserWindow | null = null;
   private screenWaterFlow: BrowserWindow | null = null;
+  private lastPauseShortcut = '';
+  private lastStopShortcut = '';
   private lastShowPredictionMarkerPos: { xPos: number; yPos: number } | null =
     null;
 
@@ -35,6 +39,89 @@ class ScreenMarker {
       ScreenMarker.instance = new ScreenMarker();
     }
     return ScreenMarker.instance;
+  }
+
+  private registerWidgetShortcuts() {
+    const setting = SettingStore.getStore();
+    const pauseShortcut = setting.pauseShortcut || 'CommandOrControl+P';
+    const stopShortcut = setting.stopShortcut || 'CommandOrControl+Escape';
+
+    const normalize = (shortcut: string) =>
+      shortcut
+        .trim()
+        .split('+')
+        .map((item) => item.trim().toLowerCase())
+        .filter(Boolean)
+        .join('+');
+
+    if (normalize(pauseShortcut) === normalize(stopShortcut)) {
+      logger.warn(
+        '[widget shortcut] Pause and stop shortcut are same, skip register',
+      );
+      return;
+    }
+
+    if (
+      this.lastPauseShortcut &&
+      globalShortcut.isRegistered(this.lastPauseShortcut)
+    ) {
+      globalShortcut.unregister(this.lastPauseShortcut);
+    }
+
+    if (
+      this.lastStopShortcut &&
+      globalShortcut.isRegistered(this.lastStopShortcut)
+    ) {
+      globalShortcut.unregister(this.lastStopShortcut);
+    }
+
+    const pauseRegistered = globalShortcut.register(pauseShortcut, () => {
+      triggerTogglePauseRun();
+    });
+
+    const stopRegistered = globalShortcut.register(stopShortcut, () => {
+      triggerStopRun();
+    });
+
+    if (!pauseRegistered || !stopRegistered) {
+      logger.warn(
+        `[widget shortcut] register failed, pause=${pauseShortcut}, stop=${stopShortcut}`,
+      );
+      if (pauseRegistered) {
+        globalShortcut.unregister(pauseShortcut);
+      }
+      if (stopRegistered) {
+        globalShortcut.unregister(stopShortcut);
+      }
+      return;
+    }
+
+    this.lastPauseShortcut = pauseShortcut;
+    this.lastStopShortcut = stopShortcut;
+  }
+
+  private unregisterWidgetShortcuts() {
+    if (
+      this.lastPauseShortcut &&
+      globalShortcut.isRegistered(this.lastPauseShortcut)
+    ) {
+      globalShortcut.unregister(this.lastPauseShortcut);
+    }
+    if (
+      this.lastStopShortcut &&
+      globalShortcut.isRegistered(this.lastStopShortcut)
+    ) {
+      globalShortcut.unregister(this.lastStopShortcut);
+    }
+    this.lastPauseShortcut = '';
+    this.lastStopShortcut = '';
+  }
+
+  refreshWidgetShortcuts() {
+    if (!this.widgetWindow || this.widgetWindow.isDestroyed()) {
+      return;
+    }
+    this.registerWidgetShortcuts();
   }
 
   showScreenWaterFlow() {
@@ -134,6 +221,7 @@ class ScreenMarker {
   }
 
   hideWidgetWindow() {
+    this.unregisterWidgetShortcuts();
     this.widgetWindow?.close();
     this.widgetWindow = null;
   }
@@ -192,6 +280,8 @@ class ScreenMarker {
 
     const menuBuilder = new MenuBuilder(this.widgetWindow, appUpdater);
     menuBuilder.buildMenu();
+
+    this.registerWidgetShortcuts();
 
     windowManager.registerWindow(this.widgetWindow);
   }
@@ -274,6 +364,7 @@ class ScreenMarker {
   }
 
   close() {
+    this.unregisterWidgetShortcuts();
     if (this.currentOverlay) {
       this.currentOverlay.close();
       this.currentOverlay = null;
@@ -342,6 +433,10 @@ export const showScreenWaterFlow = () => {
 
 export const hideScreenWaterFlow = () => {
   ScreenMarker.getInstance().hideScreenWaterFlow();
+};
+
+export const refreshWidgetShortcuts = () => {
+  ScreenMarker.getInstance().refreshWidgetShortcuts();
 };
 
 export const closeOverlay = () => {
