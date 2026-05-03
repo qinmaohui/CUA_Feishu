@@ -98,7 +98,7 @@ export const agentRoute = t.router({
 
     await runAgent(store.setState, store.getState);
 
-    store.setState({ thinking: false });
+    store.setState({ thinking: false, thinkingMsg: null });
   }),
   pauseRun: t.procedure.input<void>().handle(async () => {
     triggerPauseRun();

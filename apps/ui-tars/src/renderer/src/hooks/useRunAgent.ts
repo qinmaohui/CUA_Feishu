@@ -18,31 +18,22 @@ const filterAndTransformWithMap = (
   history: ConversationWithSoM[],
 ): Message[] => {
   return history
-    .map((conv) => {
+    .map((conv): Message | undefined => {
       if (conv.from === 'human' && conv.value && conv.value !== '<image>') {
-        return {
-          from: conv.from,
-          value: conv.value,
-        };
+        return { from: conv.from, value: conv.value };
       } else if (conv.from === 'gpt' && conv.predictionParsed?.length) {
         const finished = conv.predictionParsed.find(
           (p) => p.action_type === 'finished' && p.action_inputs?.content,
         );
         if (finished) {
-          return {
-            from: conv.from,
-            value: finished.action_inputs!.content!,
-          };
+          return { from: conv.from, value: finished.action_inputs!.content! };
         }
 
         const callUser = conv.predictionParsed.find(
           (p) => p.action_type === 'call_user' && p.thought,
         );
         if (callUser) {
-          return {
-            from: conv.from,
-            value: callUser.thought!,
-          };
+          return { from: conv.from, value: callUser.thought! };
         }
         return undefined;
       } else {

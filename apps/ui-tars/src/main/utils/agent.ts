@@ -15,9 +15,8 @@ import {
   hideScreenWaterFlow,
   hideWidgetWindow,
   showScreenWaterFlow,
-  showWidgetWindow,
 } from '../window/ScreenMarker';
-import { hideMainWindow, showMainWindow } from '../window';
+import { showMainWindow } from '../window';
 import { SearchEngine } from '@ui-tars/operator-browser';
 
 export const getModelVersion = (
@@ -67,13 +66,9 @@ export const beforeAgentRun = async (operator: Operator) => {
     case Operator.RemoteBrowser:
       break;
     case Operator.LocalComputer:
-      showWidgetWindow();
       showScreenWaterFlow();
-      hideMainWindow();
       break;
     case Operator.LocalBrowser:
-      hideMainWindow();
-      showWidgetWindow();
       break;
     default:
       break;
