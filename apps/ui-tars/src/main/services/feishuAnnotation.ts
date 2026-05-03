@@ -2,7 +2,7 @@
  * 飞书UI自动标注服务
  * LLM粗标注 + 人工矫正流程
  */
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { app } from 'electron';
 import path from 'node:path';
@@ -382,6 +382,145 @@ async function getFeishuWindowBounds(): Promise<{
     logger.error('获取飞书窗口位置失败:', error);
     return null;
   }
+}
+
+/**
+ * Bring an existing Feishu window to the foreground.
+ * Returns true if the window was found and activated.
+ * Uses process-name lookup (same approach as getDom.ts) to avoid matching other Chromium windows.
+ */
+export async function activateFeishuWindow(): Promise<boolean> {
+  if (process.platform !== 'win32') return false;
+  // Guard Add-Type so re-running in the same PS session doesn't throw "type already exists"
+  const script = `
+    if (-not ([System.Management.Automation.PSTypeName]'Win32FgHelper').Type) {
+      Add-Type @"
+      using System;
+      using System.Runtime.InteropServices;
+      public class Win32FgHelper {
+        [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+        [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+      }
+"@
+    }
+    $procs = @(Get-Process -Name 'Feishu' -ErrorAction SilentlyContinue) + @(Get-Process -Name 'Lark' -ErrorAction SilentlyContinue)
+    $mainProc = $procs | Where-Object { $_.MainWindowHandle -ne [System.IntPtr]::Zero } | Select-Object -First 1
+    if (-not $mainProc) { Write-Output "NOT_FOUND"; exit }
+    $hWnd = $mainProc.MainWindowHandle
+    [Win32FgHelper]::ShowWindow($hWnd, 9) | Out-Null
+    [Win32FgHelper]::ShowWindow($hWnd, 3) | Out-Null
+    [Win32FgHelper]::SetForegroundWindow($hWnd) | Out-Null
+    Write-Output "OK"
+  `;
+  try {
+    const { stdout } = await execFileAsync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-NoLogo',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-Command',
+        `$Env:DISABLE_PSREADLINE=1; ${script}`,
+      ],
+      {
+        timeout: 8000,
+        env: {
+          ...process.env,
+          DISABLE_PSREADLINE: '1',
+          __PSDisableModuleAnalysisCache: '1',
+        },
+      },
+    );
+    return stdout.trim() === 'OK';
+  } catch (e) {
+    logger.warn('[activateFeishuWindow] Failed:', e);
+    return false;
+  }
+}
+
+/**
+ * Ensure Feishu is running and in the foreground before the agent starts.
+ * If already running, activates the window. If not, launches it and polls up to 10s.
+ * Accepts optional setState/getState to surface launch progress in the Widget.
+ */
+export async function ensureFeishuForeground(
+  setState?: (patch: Record<string, unknown>) => void,
+): Promise<void> {
+  if (process.platform !== 'win32') return;
+
+  const setPhase = (label: string) => {
+    setState?.({ memoryPhases: [{ id: 'feishu', label, status: 'active' }] });
+  };
+
+  setPhase('正在激活飞书...');
+  const activated = await activateFeishuWindow();
+  if (activated) {
+    logger.info('[ensureFeishuForeground] Feishu window activated');
+    setState?.({
+      memoryPhases: [{ id: 'feishu', label: '飞书已就绪', status: 'done' }],
+    });
+    return;
+  }
+
+  const FEISHU_PATHS = [
+    path.join(process.env.LOCALAPPDATA ?? '', 'Feishu', 'Feishu.exe'),
+    path.join(process.env.LOCALAPPDATA ?? '', 'Lark', 'Lark.exe'),
+  ];
+
+  let launchPath: string | null = null;
+  for (const p of FEISHU_PATHS) {
+    try {
+      await fs.access(p);
+      launchPath = p;
+      break;
+    } catch {
+      /* not at this path */
+    }
+  }
+
+  if (!launchPath) {
+    logger.warn(
+      '[ensureFeishuForeground] Feishu executable not found, skipping',
+    );
+    setState?.({
+      memoryPhases: [
+        { id: 'feishu', label: '未找到飞书，跳过', status: 'failed' },
+      ],
+    });
+    return;
+  }
+
+  setPhase('正在启动飞书...');
+  logger.info('[ensureFeishuForeground] Launching Feishu:', launchPath);
+  const child = spawn(launchPath, [], { detached: true, stdio: 'ignore' });
+  child.unref();
+
+  const POLL_INTERVAL_MS = 500;
+  const MAX_ATTEMPTS = 20;
+  for (let i = 0; i < MAX_ATTEMPTS; i++) {
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    const ok = await activateFeishuWindow();
+    if (ok) {
+      logger.info(
+        '[ensureFeishuForeground] Feishu window appeared after',
+        (i + 1) * POLL_INTERVAL_MS,
+        'ms',
+      );
+      setState?.({
+        memoryPhases: [{ id: 'feishu', label: '飞书已就绪', status: 'done' }],
+      });
+      return;
+    }
+  }
+
+  logger.warn(
+    '[ensureFeishuForeground] Feishu window did not appear within 10s',
+  );
+  setState?.({
+    memoryPhases: [{ id: 'feishu', label: '飞书启动超时', status: 'failed' }],
+  });
 }
 
 /**
