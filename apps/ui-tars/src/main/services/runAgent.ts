@@ -21,7 +21,8 @@ import {
 } from '@ui-tars/operator-browser';
 import { showPredictionMarker } from '@main/window/ScreenMarker';
 import { SettingStore } from '@main/store/setting';
-import { AppState, Operator } from '@main/store/types';
+import { AgentMemoryStore, MemoryStep } from '@main/store/agentMemory';
+import { AppState, Operator, MemoryPhase } from '@main/store/types';
 import { GUIAgentManager } from '../ipcRoutes/agent';
 import { checkBrowserAvailability } from './browserCheck';
 import {
@@ -35,17 +36,43 @@ import { FREE_MODEL_BASE_URL } from '../remote/shared';
 import { getAuthHeader } from '../remote/auth';
 import { ProxyClient } from '../remote/proxyClient';
 import { UITarsModelConfig } from '@ui-tars/sdk/core';
-import { runAutoAnnotation } from './feishuAnnotation';
-import { resetTaskA11yContext } from './getDom';
+import { runAutoAnnotation, ensureFeishuForeground } from './feishuAnnotation';
+import { showWidgetWindow } from '../window/ScreenMarker';
+import { hideMainWindow } from '../window';
+import { resetTaskA11yContext, queryAccessibilityTree } from './getDom';
+import { embedInstruction, findTopKSimilarMemories } from './memoryEmbedding';
+import { replayByMemory, checkReplayScreenState } from './replayExecutor';
 
 export const runAgent = async (
   setState: (state: AppState) => void,
   getState: () => AppState,
 ) => {
   logger.info('runAgent');
+
   const settings = SettingStore.getStore();
   const { instructions, abortController } = getState();
   assert(instructions, 'instructions is required');
+
+  // Show Widget and hide main window immediately so the user sees progress during memory retrieval
+  if (
+    settings.operator === Operator.LocalComputer ||
+    settings.operator === Operator.LocalBrowser
+  ) {
+    showWidgetWindow();
+    hideMainWindow();
+  }
+
+  // Set feishu-launch phase first so Widget renders before ensureFeishuForeground runs
+  setState({
+    ...getState(),
+    memoryPhases: [
+      { id: 'feishu', label: '正在激活飞书...', status: 'active' },
+    ],
+    replayProgress: null,
+  });
+  await ensureFeishuForeground((patch) =>
+    setState({ ...getState(), ...patch }),
+  );
 
   const language = settings.language ?? 'en';
 
@@ -256,8 +283,241 @@ When deciding where to click or type:
 3. Only if the target is missing from [A11Y_CONTEXT], fall back to screenshot-based estimation.
 `;
 
+  // Memory: search for similar past successes before starting
+  const MEMORY_SIMILARITY_THRESHOLD = 0.84;
+  let memoryGuidance = '';
+  let runInstruction = instructions;
+
+  const makePhases = (
+    activeId: string,
+    doneIds: string[],
+    failedIds: string[] = [],
+    details: Record<string, string> = {},
+  ): MemoryPhase[] => {
+    const PHASES = [
+      { id: 'retrieve', label: '检索中' },
+      { id: 'found', label: '找到记忆' },
+      { id: 'check', label: '判断起点' },
+      { id: 'replay', label: '重放/参考模式' },
+    ];
+    return PHASES.map(({ id, label }) => ({
+      id,
+      label,
+      status: failedIds.includes(id)
+        ? 'failed'
+        : doneIds.includes(id)
+          ? 'done'
+          : id === activeId
+            ? 'active'
+            : 'pending',
+      detail: details[id],
+    }));
+  };
+
+  // Helper: push a system-level message into chat history so it appears in session records
+  const pushSystemMessage = (text: string) => {
+    const msg: ConversationWithSoM = {
+      from: 'system',
+      value: text,
+      timing: { start: Date.now(), end: Date.now(), cost: 0 },
+    };
+    setState({ ...getState(), messages: [...getState().messages, msg] });
+  };
+
+  if (operator!) {
+    setState({
+      ...getState(),
+      thinkingMsg: '正在检索相似记忆...',
+      memoryPhases: makePhases('retrieve', []),
+    });
+    const topMatches = await findTopKSimilarMemories(
+      instructions,
+      settings.operator,
+      3,
+    );
+    const bestMatch = topMatches[0];
+
+    if (bestMatch && bestMatch.score >= MEMORY_SIMILARITY_THRESHOLD) {
+      logger.info(
+        '[runAgent] Memory hit:',
+        bestMatch.memory.id,
+        'score:',
+        bestMatch.score,
+      );
+      const scoreStr = `${(bestMatch.score * 100).toFixed(0)}%`;
+      const memName =
+        bestMatch.memory.name || bestMatch.memory.instruction.slice(0, 40);
+
+      setState({
+        ...getState(),
+        thinkingMsg: '找到相似记忆，正在判断起点...',
+        memoryPhases: makePhases('check', ['retrieve', 'found'], [], {
+          found: `${memName}（相似度 ${scoreStr}，共 ${bestMatch.memory.steps.length} 步）`,
+        }),
+      });
+
+      // Push "found memory" message first so it appears before the VLM judgment
+      pushSystemMessage(
+        `[记忆检索] 找到相似记忆「${memName}」（相似度 ${scoreStr}，共 ${bestMatch.memory.steps.length} 步），正在判断起点...`,
+      );
+
+      const screenCheck = bestMatch.memory.startA11ySnapshot
+        ? await checkReplayScreenState(
+            bestMatch.memory.startA11ySnapshot,
+            bestMatch.memory.steps,
+            (stage, text) => {
+              if (stage === 'thinking') {
+                setState({
+                  ...getState(),
+                  thinkingMsg: text,
+                  memoryPhases: makePhases('check', ['retrieve', 'found'], [], {
+                    found: `${memName}（${scoreStr}）`,
+                    check: text,
+                  }),
+                });
+              } else {
+                pushSystemMessage(text);
+                setState({
+                  ...getState(),
+                  memoryPhases: makePhases('check', ['retrieve', 'found'], [], {
+                    found: `${memName}（${scoreStr}）`,
+                    check: text,
+                  }),
+                });
+              }
+            },
+          )
+        : { ok: true };
+
+      if (!screenCheck.ok) {
+        logger.info(
+          '[runAgent] Screen state mismatch:',
+          screenCheck.reason,
+          '- falling back to reference mode',
+        );
+        setState({
+          ...getState(),
+          thinkingMsg: '起点状态不匹配，切换到参考模式...',
+          memoryPhases: makePhases(
+            'replay',
+            ['retrieve', 'found', 'check', 'replay'],
+            [],
+            {
+              found: `${memName}（${scoreStr}）`,
+              replay: '参考模式（起点不匹配）',
+            },
+          ),
+        });
+        pushSystemMessage(`[起点判断] 起点状态不匹配，切换到参考模式执行。`);
+        memoryGuidance = `\n\n## Memory Reference\nA similar task was previously completed successfully. Key steps for reference:\n${bestMatch.memory.steps
+          .map((s, i) => `${i + 1}. ${s.action_type}: ${s.thought}`)
+          .join('\n')}\nAdapt these steps to the current UI state as needed.`;
+      } else {
+        setState({
+          ...getState(),
+          thinkingMsg: '正在重放操作...',
+          memoryPhases: makePhases(
+            'replay',
+            ['retrieve', 'found', 'check'],
+            [],
+            {
+              found: `${memName}（${scoreStr}）`,
+            },
+          ),
+        });
+        const replayResult = await replayByMemory({
+          operator: operator!,
+          memorySteps: bestMatch.memory.steps,
+          onStepStart: (i, step) => {
+            setState({
+              ...getState(),
+              replayProgress: {
+                current: i + 1,
+                total: bestMatch.memory.steps.length,
+                currentStep: step,
+              },
+            });
+          },
+        });
+        setState({ ...getState(), replayProgress: null });
+
+        if (replayResult.ok) {
+          logger.info('[runAgent] Replay succeeded, running verification pass');
+          setState({
+            ...getState(),
+            thinkingMsg: '重放成功，验证任务完成情况...',
+            memoryPhases: makePhases(
+              'replay',
+              ['retrieve', 'found', 'check', 'replay'],
+              [],
+              {
+                found: `${memName}（${scoreStr}）`,
+                replay: `重放成功（${bestMatch.memory.steps.length} 步）`,
+              },
+            ),
+          });
+          pushSystemMessage(
+            `[重放] 成功执行 ${bestMatch.memory.steps.length} 步，正在验证任务结果。`,
+          );
+          runInstruction =
+            `以下步骤已自动重放完成。原始任务："${instructions}"。` +
+            `请检查任务是否已完成。若已完成，调用 finished()。若未完成，从当前状态继续完成任务。`;
+        } else {
+          logger.info(
+            '[runAgent] Replay failed at step',
+            replayResult.failStep,
+            ':',
+            replayResult.reason,
+            '- falling back to reference mode',
+          );
+          setState({
+            ...getState(),
+            thinkingMsg: '重放失败，切换到参考模式...',
+            memoryPhases: makePhases(
+              'replay',
+              ['retrieve', 'found', 'check'],
+              ['replay'],
+              {
+                found: `${memName}（${scoreStr}）`,
+                replay: `第 ${(replayResult.failStep ?? 0) + 1} 步失败，切换参考模式`,
+              },
+            ),
+          });
+          pushSystemMessage(
+            `[重放] 第 ${(replayResult.failStep ?? 0) + 1} 步执行失败，切换到参考模式继续执行。`,
+          );
+          memoryGuidance = `\n\n## Memory Reference\nA similar task was previously completed successfully. Key steps for reference:\n${bestMatch.memory.steps
+            .map((s, i) => `${i + 1}. ${s.action_type}: ${s.thought}`)
+            .join('\n')}\nAdapt these steps to the current UI state as needed.`;
+        }
+      }
+    } else {
+      setState({
+        ...getState(),
+        thinkingMsg: '未找到匹配记忆，正常执行...',
+        memoryPhases: [
+          { id: 'retrieve', label: '检索中', status: 'done' },
+          {
+            id: 'found',
+            label: '未找到匹配',
+            status: 'failed',
+            detail: topMatches[0]
+              ? `最高相似度 ${(topMatches[0].score * 100).toFixed(0)}%`
+              : undefined,
+          },
+          { id: 'check', label: '判断起点', status: 'pending' },
+          { id: 'replay', label: '重放/参考模式', status: 'pending' },
+        ],
+      });
+    }
+  }
+
+  setState({ ...getState(), thinkingMsg: 'Thinking...' });
+
   const systemPrompt =
-    getSpByModelVersion(modelVersion, language, operatorType) + a11yGuidance;
+    getSpByModelVersion(modelVersion, language, operatorType) +
+    a11yGuidance +
+    memoryGuidance;
 
   const guiAgent = new GUIAgent({
     model: modelConfig,
@@ -306,7 +566,7 @@ When deciding where to click or type:
   const startTime = Date.now();
 
   await guiAgent
-    .run(instructions, sessionHistoryMessages, modelAuthHdrs)
+    .run(runInstruction, sessionHistoryMessages, modelAuthHdrs)
     .catch((e) => {
       logger.error('[runAgentLoop error]', e);
       setState({
@@ -317,6 +577,60 @@ When deciding where to click or type:
     });
 
   logger.info('[runAgent Totoal cost]: ', (Date.now() - startTime) / 1000, 's');
+
+  // Memory: save successful run as reusable memory
+  const finalState = getState();
+  if (finalState.status === StatusEnum.END) {
+    const steps: MemoryStep[] = finalState.messages
+      .flatMap((conv) => conv.predictionParsed ?? [])
+      .filter(
+        (p) =>
+          p.action_type && !['screenshot', 'finished'].includes(p.action_type),
+      )
+      .map((p) => ({
+        action_type: p.action_type,
+        action_inputs: (p.action_inputs ?? {}) as Record<string, unknown>,
+        thought: p.thought ?? '',
+        reflection: p.reflection ?? null,
+      }));
+
+    if (steps.length > 0) {
+      const instructionEmbedding = await embedInstruction(instructions);
+
+      let startA11ySnapshot: string | undefined;
+      try {
+        const a11yResult = await queryAccessibilityTree({});
+        startA11ySnapshot =
+          a11yResult?.extraction?.extractionText?.slice(0, 2000) ?? undefined;
+      } catch (e) {
+        logger.warn(
+          '[runAgent] Failed to capture A11y snapshot for memory:',
+          e,
+        );
+      }
+
+      const now = Date.now();
+      AgentMemoryStore.save({
+        id: `memory_${now}_${Math.random().toString(36).slice(2, 9)}`,
+        name: instructions.slice(0, 50).trim(),
+        instruction: instructions,
+        instructionEmbedding,
+        operator: settings.operator,
+        steps,
+        startA11ySnapshot,
+        successMeta: {
+          createdAt: now,
+          updatedAt: now,
+          successCount: 1,
+          lastSuccessAt: now,
+        },
+      });
+      logger.info(
+        '[runAgent] Memory saved for instruction:',
+        instructions.slice(0, 50),
+      );
+    }
+  }
 
   afterAgentRun(settings.operator);
   resetTaskA11yContext();
