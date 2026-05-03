@@ -1,0 +1,492 @@
+[
+  {
+    "id": "168682ff-b50e-41c7-988b-b5eade9563cb",
+    "timestamp": 1777371109553,
+    "screenshotPath": "1777370951331_6d9180a1-efd8-48a8-b606-91176d9ec76c.jpg",
+    "screenshotInfo": {
+      "width": 3840,
+      "height": 2160,
+      "scaleFactor": 1.5
+    },
+    "pageType": "消息页",
+    "elements": [
+      {
+        "id": "54c42cd9-df0c-4155-b0e5-e5d7cfd1f2f1",
+        "type": "container",
+        "name": "左侧导航栏",
+        "boundingBox": [
+          -1.2121304598721592,
+          4.242414994673296,
+          266.0605968128551,
+          2086.0605968128552
+        ],
+        "isInteractive": true,
+        "confidence": 1,
+        "isCorrected": true,
+        "createdBy": "human",
+        "description": "",
+        "children": []
+      },
+      {
+        "id": "e4be4a60-23a3-43a7-8a81-391baebf346d",
+        "type": "container",
+        "name": "消息内容栏",
+        "boundingBox": [
+          267.87877863103694,
+          4.242414994673296,
+          946.0605968128552,
+          2089.696960449219
+        ],
+        "isInteractive": true,
+        "confidence": 1,
+        "isCorrected": true,
+        "createdBy": "human",
+        "description": "",
+        "children": []
+      },
+      {
+        "id": "68de8290-2f76-4fb2-9553-2a26caa830e7",
+        "type": "container",
+        "name": "聊天内容栏",
+        "boundingBox": [
+          947.878778631037,
+          7.8787786310369325,
+          3835.1515059037647,
+          2086.0605968128552
+        ],
+        "isInteractive": true,
+        "confidence": 1,
+        "isCorrected": true,
+        "createdBy": "human",
+        "description": "",
+        "children": []
+      },
+      {
+        "id": "f88b2242-ba18-41b4-9f49-9f7399a3fe60",
+        "type": "container",
+        "name": "左侧导航栏",
+        "boundingBox": [
+          -1.2121304598721592,
+          4.242414994673296,
+          266.0605968128551,
+          2086.0605968128552
+        ],
+        "description": "",
+        "isInteractive": false,
+        "confidence": 1,
+        "isCorrected": false,
+        "createdBy": "llm",
+        "children": []
+      },
+      {
+        "id": "91787ec1-698e-46da-89a8-a01a74428436",
+        "type": "container",
+        "name": "消息内容栏",
+        "boundingBox": [
+          267.87877863103694,
+          4.242414994673296,
+          946.0605968128552,
+          2089.696960449219
+        ],
+        "description": "",
+        "isInteractive": false,
+        "confidence": 1,
+        "isCorrected": false,
+        "createdBy": "llm",
+        "children": []
+      },
+      {
+        "id": "99e5f1e8-a3dc-4b5f-87d0-ce7ad652a912",
+        "type": "container",
+        "name": "聊天内容栏",
+        "boundingBox": [
+          947.878778631037,
+          7.8787786310369325,
+          3835.1515059037647,
+          2086.0605968128552
+        ],
+        "description": "",
+        "isInteractive": false,
+        "confidence": 1,
+        "isCorrected": false,
+        "createdBy": "llm",
+        "children": []
+      },
+      {
+        "id": "da6654ef-686b-41a3-9c9e-b065f916bafe",
+        "type": "input",
+        "name": "全局搜索框",
+        "description": "可搜索飞书内联系人、消息、文档等资源",
+        "boundingBox": [
+          4,
+          37,
+          65,
+          58
+        ],
+        "isInteractive": true,
+        "confidence": 0.98,
+        "isCorrected": false,
+        "createdBy": "llm",
+        "children": []
+      },
+      {
+        "id": "4f781cec-b0a8-4f8e-acf3-ac173a4e8354",
+        "type": "input",
+        "name": "聊天消息输入框",
+        "description": "用于输入编辑需要发送的聊天内容",
+        "boundingBox": [
+          948,
+          2087,
+          3805,
+          2133
+        ],
+        "isInteractive": true,
+        "confidence": 0.99,
+        "isCorrected": false,
+        "createdBy": "llm",
+        "children": []
+      },
+      {
+        "id": "3db54d3e-9c3b-472f-890f-59fca478b9a8",
+        "type": "button",
+        "name": "消息发送按钮",
+        "description": "点击将输入框内的内容发送到当前聊天群",
+        "boundingBox": [
+          3808,
+          2091,
+          3829,
+          2129
+        ],
+        "isInteractive": true,
+        "confidence": 0.98,
+        "isCorrected": false,
+        "createdBy": "llm",
+        "children": []
+      },
+      {
+        "id": "78fa7191-6b6c-4893-94a3-8946fd17ee75",
+        "type": "container",
+        "name": "左侧导航栏",
+        "description": "飞书全局功能导航栏，提供消息、云文档、工作台等功能入口",
+        "boundingBox": [
+          0,
+          0,
+          67,
+          956
+        ],
+        "isInteractive": true,
+        "confidence": 0.98,
+        "isCorrected": false,
+        "createdBy": "llm",
+        "children": []
+      },
+      {
+        "id": "7c8cdc25-c405-46a4-86fb-e5d8273aa6f0",
+        "type": "container",
+        "name": "云文档侧边导航栏",
+        "description": "云文档次级功能导航栏，提供主页、云盘、知识库等云文档相关功能入口",
+        "boundingBox": [
+          68,
+          0,
+          184,
+          956
+        ],
+        "isInteractive": true,
+        "confidence": 0.97,
+        "isCorrected": false,
+        "createdBy": "llm",
+        "children": []
+      },
+      {
+        "id": "62f5c178-6903-4c98-8a78-348bea09be85",
+        "type": "container",
+        "name": "云文档内容区",
+        "description": "展示云文档主页内容，包含新建、上传、模板库操作按钮和文档列表",
+        "boundingBox": [
+          185,
+          0,
+          1999,
+          956
+        ],
+        "isInteractive": true,
+        "confidence": 0.98,
+        "isCorrected": false,
+        "createdBy": "llm",
+        "children": []
+      },
+      {
+        "id": "d0afd8c4-2316-4991-9083-6d2936ca4507",
+        "type": "container",
+        "name": "聊天会话标题栏",
+        "description": "显示当前聊天对象名称，提供搜索、通话等相关操作入口",
+        "boundingBox": [
+          948,
+          5,
+          1918,
+          56
+        ],
+        "isInteractive": true,
+        "confidence": 0.98,
+        "isCorrected": false,
+        "createdBy": "llm",
+        "children": []
+      },
+      {
+        "id": "1bb518c4-1895-4d24-bd41-ad8ac5ccdada",
+        "type": "input",
+        "name": "聊天输入框",
+        "description": "供用户输入需要发送的聊天内容",
+        "boundingBox": [
+          268,
+          910,
+          1870,
+          950
+        ],
+        "isInteractive": true,
+        "confidence": 0.98,
+        "isCorrected": false,
+        "createdBy": "llm",
+        "children": []
+      },
+      {
+        "id": "a581ebbd-cd09-4731-8720-16eb7f62dc2b",
+        "type": "button",
+        "name": "消息发送按钮",
+        "description": "点击后将输入框内的内容发送给当前聊天对象",
+        "boundingBox": [
+          1872,
+          915,
+          1896,
+          945
+        ],
+        "isInteractive": true,
+        "confidence": 0.98,
+        "isCorrected": false,
+        "createdBy": "llm",
+        "children": []
+      },
+      {
+        "id": "9eebb1de-f7a9-4d10-b081-2280dbb2e30b",
+        "type": "listItem",
+        "name": "会话列表项-覃茂辉Test",
+        "description": "点击可切换到与覃茂辉Test的聊天界面",
+        "boundingBox": [
+          78,
+          192,
+          260,
+          230
+        ],
+        "isInteractive": true,
+        "confidence": 0.96,
+        "isCorrected": false,
+        "createdBy": "llm",
+        "children": []
+      },
+      {
+        "id": "dbb1536b-caee-45a5-9440-952b5715553a",
+        "type": "listItem",
+        "name": "当前选中会话项",
+        "description": "当前处于选中状态的聊天会话，为覃茂辉Test外部会话",
+        "boundingBox": [
+          76,
+          190,
+          249,
+          226
+        ],
+        "isInteractive": true,
+        "confidence": 0.97,
+        "isCorrected": false,
+        "createdBy": "llm",
+        "children": []
+      },
+      {
+        "id": "156de644-65ed-4534-ae51-82ac8a7df51e",
+        "type": "icon",
+        "name": "加载中指示器",
+        "description": "表示聊天内容正在加载中",
+        "boundingBox": [
+          490,
+          463,
+          510,
+          494
+        ],
+        "isInteractive": false,
+        "confidence": 0.95,
+        "isCorrected": false,
+        "createdBy": "llm",
+        "children": []
+      },
+      {
+        "id": "cd055105-ea89-488f-a177-673abdd05860",
+        "type": "input",
+        "name": "消息输入框",
+        "description": "用于输入待发送的聊天消息",
+        "boundingBox": [
+          266,
+          911,
+          3832,
+          947
+        ],
+        "isInteractive": true,
+        "confidence": 0.99,
+        "isCorrected": false,
+        "createdBy": "llm",
+        "children": []
+      },
+      {
+        "id": "a38b8082-2001-4655-8fe2-874b9ce23039",
+        "type": "button",
+        "name": "发送按钮",
+        "description": "点击后发送输入框内的聊天消息",
+        "boundingBox": [
+          3810,
+          920,
+          3829,
+          940
+        ],
+        "isInteractive": true,
+        "confidence": 0.96,
+        "isCorrected": false,
+        "createdBy": "llm",
+        "children": []
+      },
+      {
+        "id": "abb57b51-f141-4575-9d31-ed8baa12f8a9",
+        "type": "container",
+        "name": "表情选择面板",
+        "description": "点击选择对应表情插入到聊天输入框中",
+        "boundingBox": [
+          3200,
+          630,
+          3830,
+          2080
+        ],
+        "isInteractive": true,
+        "confidence": 0.96,
+        "isCorrected": false,
+        "createdBy": "llm",
+        "children": []
+      },
+      {
+        "id": "b8063eaf-1120-412b-aad3-4a76b0c8dfac",
+        "type": "button",
+        "name": "消息菜单按钮",
+        "description": "点击切换到消息页面",
+        "boundingBox": [
+          2,
+          72,
+          62,
+          96
+        ],
+        "isInteractive": true,
+        "confidence": 0.95,
+        "isCorrected": false,
+        "createdBy": "llm",
+        "children": []
+      },
+      {
+        "id": "89c8fdd1-56f7-48c9-97c1-4fe0e559a9b3",
+        "type": "button",
+        "name": "云文档菜单按钮",
+        "description": "点击切换到云文档页面",
+        "boundingBox": [
+          2,
+          122,
+          62,
+          146
+        ],
+        "isInteractive": true,
+        "confidence": 0.95,
+        "isCorrected": false,
+        "createdBy": "llm",
+        "children": []
+      },
+      {
+        "id": "070ecb19-753d-4dc9-bc8f-10b02c6d2793",
+        "type": "button",
+        "name": "通讯录菜单按钮",
+        "description": "点击切换到通讯录页面",
+        "boundingBox": [
+          2,
+          271,
+          62,
+          295
+        ],
+        "isInteractive": true,
+        "confidence": 0.95,
+        "isCorrected": false,
+        "createdBy": "llm",
+        "children": []
+      },
+      {
+        "id": "ed3733b2-4152-4de4-b0d3-1cc4f514b011",
+        "type": "text",
+        "name": "当前聊天标题",
+        "description": "显示当前正在聊天的对象名称",
+        "boundingBox": [
+          275,
+          28,
+          335,
+          52
+        ],
+        "isInteractive": false,
+        "confidence": 0.96,
+        "isCorrected": false,
+        "createdBy": "llm",
+        "children": []
+      },
+      {
+        "id": "45788f9e-1541-43d1-aae8-78c2b08baeb5",
+        "type": "button",
+        "name": "聊天内搜索按钮",
+        "description": "搜索当前聊天中的历史消息",
+        "boundingBox": [
+          952,
+          28,
+          967,
+          48
+        ],
+        "isInteractive": true,
+        "confidence": 0.94,
+        "isCorrected": false,
+        "createdBy": "llm",
+        "children": []
+      },
+      {
+        "id": "d17f87c0-63eb-44d9-8249-3e7df44c705d",
+        "type": "button",
+        "name": "语音通话按钮",
+        "description": "向当前聊天对象发起语音通话",
+        "boundingBox": [
+          968,
+          28,
+          983,
+          48
+        ],
+        "isInteractive": true,
+        "confidence": 0.94,
+        "isCorrected": false,
+        "createdBy": "llm",
+        "children": []
+      },
+      {
+        "id": "3846f869-428b-48f7-a55a-44a65b735b51",
+        "type": "button",
+        "name": "视频通话按钮",
+        "description": "向当前聊天对象发起视频通话",
+        "boundingBox": [
+          984,
+          28,
+          999,
+          48
+        ],
+        "isInteractive": true,
+        "confidence": 0.94,
+        "isCorrected": false,
+        "createdBy": "llm",
+        "children": []
+      }
+    ],
+    "tags": []
+  }
+]
