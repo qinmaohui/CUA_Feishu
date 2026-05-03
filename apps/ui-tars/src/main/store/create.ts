@@ -21,6 +21,9 @@ export const store = createStore<AppState>(
       ensurePermissions: {},
       abortController: null,
       thinking: false,
+      thinkingMsg: null,
       browserAvailable: false, // Defaults to false until the detection is complete
+      memoryPhases: null,
+      replayProgress: null,
     }) satisfies AppState,
 );

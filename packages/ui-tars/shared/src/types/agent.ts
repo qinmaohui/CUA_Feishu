@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 export interface Message {
-  from: 'gpt' | 'human';
+  from: 'gpt' | 'human' | 'system';
   value: string; // <image>
 }
 

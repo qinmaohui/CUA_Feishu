@@ -6,6 +6,7 @@ import { GUIAgentData, Message } from '@ui-tars/shared/types';
 
 import { LocalStore, PresetSource } from './validate';
 import { ConversationWithSoM } from '@main/shared/types';
+import type { MemoryStep } from './agentMemory';
 
 export type NextAction =
   | { type: 'key'; text: string }
@@ -21,6 +22,15 @@ export type NextAction =
   | { type: 'finish' }
   | { type: 'error'; message: string };
 
+export type MemoryPhaseStatus = 'pending' | 'active' | 'done' | 'failed';
+
+export interface MemoryPhase {
+  id: string;
+  label: string;
+  status: MemoryPhaseStatus;
+  detail?: string;
+}
+
 export type AppState = {
   theme: 'dark' | 'light';
   ensurePermissions: { screenCapture?: boolean; accessibility?: boolean };
@@ -32,7 +42,14 @@ export type AppState = {
   messages: ConversationWithSoM[];
   abortController: AbortController | null;
   thinking: boolean;
+  thinkingMsg: string | null;
   browserAvailable: boolean;
+  memoryPhases: MemoryPhase[] | null;
+  replayProgress: {
+    current: number;
+    total: number;
+    currentStep: MemoryStep | null;
+  } | null;
 };
 
 export enum VlmProvider {
