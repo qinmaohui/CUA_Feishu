@@ -24,6 +24,7 @@ import {
   HumanTextMessage,
   LoadingText,
   ScreenshotMessage,
+  SystemMessage,
 } from '../../components/RunMessages/Messages';
 import ThoughtChain from '../../components/ThoughtChain';
 import { api } from '../../api';
@@ -221,6 +222,12 @@ const LocalOperator = () => {
           )}
 
           {chatMessages?.map((message, idx) => {
+            if (message?.from === 'system') {
+              return (
+                <SystemMessage key={`message-${idx}`} text={message.value} />
+              );
+            }
+
             if (message?.from === 'human') {
               if (message?.value === IMAGE_PLACEHOLDER) {
                 // screen shot

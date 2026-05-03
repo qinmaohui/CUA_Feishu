@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { useState } from 'react';
-import { AlertCircle, Camera, ChevronDown, Loader2 } from 'lucide-react';
+import { AlertCircle, Camera, ChevronDown, Info, Loader2 } from 'lucide-react';
 import { ErrorStatusEnum } from '@ui-tars/shared/types';
 
 import { Button } from '@renderer/components/ui/button';
@@ -13,6 +13,20 @@ import {
   AlertTitle,
 } from '@renderer/components/ui/alert';
 import { Markdown } from '../markdown';
+
+export const SystemMessage = ({ text }: { text: string }) => {
+  return (
+    <div className="flex gap-2 my-3 items-start">
+      <div className="flex-1 px-3 py-2 rounded-md bg-gray-50 border border-gray-200 text-sm text-gray-600">
+        <div className="flex items-center gap-1.5 mb-1 text-xs font-medium text-gray-400">
+          <Info className="h-3 w-3" />
+          System
+        </div>
+        <Markdown>{text}</Markdown>
+      </div>
+    </div>
+  );
+};
 
 export const HumanTextMessage = ({ text }: { text: string }) => {
   return (

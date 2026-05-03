@@ -24,13 +24,14 @@ import ImageGallery from '../ImageGallery';
 import {
   ErrorMessage,
   HumanTextMessage,
+  SystemMessage,
   AssistantTextMessage,
   ScreenshotMessage,
   LoadingText,
 } from './Messages';
 
 const RunMessages = () => {
-  const { messages = [], thinking, errorMsg } = useStore();
+  const { messages = [], thinking, errorMsg, thinkingMsg } = useStore();
   const containerRef = React.useRef<HTMLDivElement>(null);
   const suggestions: string[] = [];
   const [selectImg, setSelectImg] = useState<number | undefined>(undefined);
@@ -95,6 +96,12 @@ const RunMessages = () => {
           )}
 
           {chatMessages?.map((message, idx) => {
+            if (message?.from === 'system') {
+              return (
+                <SystemMessage key={`message-${idx}`} text={message.value} />
+              );
+            }
+
             if (message?.from === 'human') {
               if (message?.value === IMAGE_PLACEHOLDER) {
                 // screen shot
@@ -147,7 +154,7 @@ const RunMessages = () => {
             );
           })}
 
-          {thinking && <LoadingText text={'Thinking...'} />}
+          {thinking && <LoadingText text={thinkingMsg || 'Thinking...'} />}
           {errorMsg && <ErrorMessage text={errorMsg} />}
         </div>
       </div>

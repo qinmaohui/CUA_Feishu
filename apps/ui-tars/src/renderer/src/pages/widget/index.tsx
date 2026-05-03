@@ -3,10 +3,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { useStore } from '@renderer/hooks/useStore';
-import { Monitor, Globe, MousePointerClick } from 'lucide-react';
+import {
+  Monitor,
+  Globe,
+  MousePointerClick,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  Circle,
+} from 'lucide-react';
 import { ActionIconMap } from '@renderer/const/actions';
 import { useSetting } from '@renderer/hooks/useSetting';
 import { StatusEnum } from '@ui-tars/sdk';
+import type { MemoryPhase, MemoryPhaseStatus } from '@main/store/types';
+import type { MemoryStep } from '@main/store/agentMemory';
 
 import logo from '@resources/logo-full.png?url';
 import { useEffect, useState } from 'react';
@@ -50,8 +60,83 @@ const getOperatorLabel = (type: string) => {
   }
 };
 
+const PHASE_ICON: Record<MemoryPhaseStatus, React.ReactNode> = {
+  pending: <Circle className="h-3 w-3 text-gray-300" />,
+  active: <Loader2 className="h-3 w-3 text-blue-500 animate-spin" />,
+  done: <CheckCircle2 className="h-3 w-3 text-emerald-500" />,
+  failed: <XCircle className="h-3 w-3 text-red-400" />,
+};
+
+const PHASE_TEXT: Record<MemoryPhaseStatus, string> = {
+  pending: 'text-gray-400',
+  active: 'text-blue-600',
+  done: 'text-gray-700',
+  failed: 'text-red-500',
+};
+
+const MemoryPhasesBlock = ({ phases }: { phases: MemoryPhase[] }) => (
+  <div className="mt-3 mb-2 rounded-lg border border-gray-200 bg-gray-50/80 px-3 py-2">
+    <div className="text-xs font-semibold text-gray-500 mb-1.5">记忆检索</div>
+    <div className="flex flex-col gap-1">
+      {phases.map((phase) => (
+        <div key={phase.id} className="flex flex-col gap-0.5">
+          <div className="flex items-center gap-2 text-xs">
+            {PHASE_ICON[phase.status]}
+            <span className={PHASE_TEXT[phase.status]}>{phase.label}</span>
+          </div>
+          {phase.detail && (
+            <div className="ml-5 text-xs text-gray-400 truncate">
+              {phase.detail}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
+const ReplayProgressBlock = ({
+  progress,
+}: {
+  progress: { current: number; total: number; currentStep: MemoryStep | null };
+}) => (
+  <div className="mt-2 mb-2 rounded-lg border border-blue-200 bg-blue-50/80 px-3 py-2">
+    <div className="flex items-center justify-between mb-1">
+      <span className="text-xs font-semibold text-blue-600">正在重放操作</span>
+      <span className="text-xs text-blue-500">
+        {progress.current}/{progress.total}
+      </span>
+    </div>
+    <div className="w-full h-1 bg-blue-100 rounded-full mb-1.5">
+      <div
+        className="h-1 bg-blue-400 rounded-full transition-all duration-300"
+        style={{ width: `${(progress.current / progress.total) * 100}%` }}
+      />
+    </div>
+    {progress.currentStep && (
+      <div className="text-xs text-gray-600 truncate">
+        <span className="font-medium text-gray-700">
+          {progress.currentStep.action_type}
+        </span>
+        {progress.currentStep.thought && (
+          <span className="text-gray-500">
+            {' '}
+            — {progress.currentStep.thought}
+          </span>
+        )}
+      </div>
+    )}
+  </div>
+);
+
 const Widget = () => {
-  const { messages = [], errorMsg, status } = useStore();
+  const {
+    messages = [],
+    errorMsg,
+    status,
+    memoryPhases,
+    replayProgress,
+  } = useStore();
   const { settings } = useSetting();
 
   const currentOperator = settings.operator || 'nutjs';
@@ -177,6 +262,9 @@ const Widget = () => {
       </div>
 
       {!!errorMsg && <div>{errorMsg}</div>}
+
+      {!!memoryPhases && <MemoryPhasesBlock phases={memoryPhases} />}
+      {!!replayProgress && <ReplayProgressBlock progress={replayProgress} />}
 
       {!!actions.length && !errorMsg && (
         <div className="mt-4 max-h-70 overflow-scroll hide_scroll_bar">

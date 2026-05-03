@@ -18,10 +18,12 @@ import { DragArea } from '@renderer/components/Common/drag';
 import { useSession } from '@renderer//hooks/useSession';
 
 import { NavHistory } from './nav-history';
+import { NavMemories } from './nav-memories';
 import { NavSettings } from './nav-footer';
 import { UITarsHeader } from './nav-header';
 
 import { Operator } from '@main/store/types';
+import type { AgentMemoryItem } from '@main/store/agentMemory';
 import { useGlobalSettings, GlobalSettings } from '../Settings/global';
 import { useStore } from '../../hooks/useStore';
 import { StatusEnum } from '@ui-tars/sdk';
@@ -128,6 +130,34 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
     setNavDialogOpen(false);
   }, []);
 
+  const handleReplay = useCallback(
+    (memory: AgentMemoryItem) => {
+      const operator = memory.operator;
+      const isFree =
+        operator === Operator.RemoteComputer ||
+        operator === Operator.RemoteBrowser;
+
+      const getRouter = () => {
+        if (
+          operator === Operator.RemoteBrowser ||
+          operator === Operator.RemoteComputer
+        ) {
+          return isFree ? '/free-remote' : '/paid-remote';
+        }
+        return '/local';
+      };
+
+      navigate(getRouter(), {
+        state: {
+          operator,
+          from: 'memory',
+          memoryInstruction: memory.instruction,
+        },
+      });
+    },
+    [navigate],
+  );
+
   const onSessionDelete = useCallback(
     async (sessionId: string) => {
       await deleteSession(sessionId);
@@ -161,6 +191,7 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
             onSessionClick={handleSessionClick}
             onSessionDelete={onSessionDelete}
           />
+          <NavMemories onReplay={handleReplay} />
         </SidebarContent>
         <SidebarFooter className="p-0">
           <NavSettings onClick={openSettings} />
