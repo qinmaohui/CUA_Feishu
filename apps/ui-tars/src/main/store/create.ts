@@ -25,5 +25,9 @@ export const store = createStore<AppState>(
       browserAvailable: false, // Defaults to false until the detection is complete
       memoryPhases: null,
       replayProgress: null,
+      isRecording: false,
+      recordingSteps: [],
+      recordingInstruction: null,
+      verifyProgress: null,
     }) satisfies AppState,
 );

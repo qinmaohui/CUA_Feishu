@@ -6,6 +6,8 @@ import {
   ChevronRight,
   Pencil,
   Play,
+  Circle,
+  RefreshCw,
 } from 'lucide-react';
 
 import {
@@ -38,6 +40,8 @@ import {
 } from '@renderer/components/ui/sheet';
 import { useAgentMemoryStore } from '@renderer/store/agentMemory';
 import type { AgentMemoryItem } from '@main/store/agentMemory';
+import { useStore } from '@renderer/hooks/useStore';
+import { api } from '@renderer/api';
 
 const formatDate = (ts: number) =>
   new Date(ts).toLocaleDateString('zh-CN', {
@@ -105,6 +109,9 @@ export function NavMemories({
   const [detailMemory, setDetailMemory] = useState<AgentMemoryItem | null>(
     null,
   );
+  const [recordDialogOpen, setRecordDialogOpen] = useState(false);
+  const [recordInstruction, setRecordInstruction] = useState('');
+  const { isRecording } = useStore();
   const { setOpen, state } = useSidebar();
 
   useEffect(() => {
@@ -133,6 +140,18 @@ export function NavMemories({
     setEditingName('');
   };
 
+  const handleStartRecording = async () => {
+    if (!recordInstruction.trim()) return;
+    setRecordDialogOpen(false);
+    await api.startRecording({ instruction: recordInstruction.trim() });
+    setRecordInstruction('');
+  };
+
+  const handleReRecord = (memory: AgentMemoryItem) => {
+    setRecordInstruction(memory.instruction);
+    setRecordDialogOpen(true);
+  };
+
   return (
     <>
       <SidebarGroup>
@@ -156,6 +175,16 @@ export function NavMemories({
               </CollapsibleTrigger>
               <CollapsibleContent className="w-full">
                 <SidebarMenuSub className="!mr-0 !pr-1">
+                  <SidebarMenuSubItem>
+                    <button
+                      className="w-full flex items-center gap-1.5 text-xs text-neutral-500 hover:text-neutral-700 px-2 py-1.5 rounded hover:bg-neutral-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                      onClick={() => setRecordDialogOpen(true)}
+                      disabled={isRecording}
+                    >
+                      <Circle className="w-3 h-3 text-red-400 fill-red-400" />
+                      {isRecording ? '录制中...' : '录制操作'}
+                    </button>
+                  </SidebarMenuSubItem>
                   {memories.length === 0 && (
                     <SidebarMenuSubItem>
                       <span className="text-xs text-neutral-400 px-2 py-1">
@@ -205,6 +234,12 @@ export function NavMemories({
                           <DropdownMenuItem onClick={() => onReplay(item)}>
                             <Play className="w-4 h-4" />
                             <span>Replay</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => handleReRecord(item)}
+                          >
+                            <RefreshCw className="w-4 h-4" />
+                            <span>Re-record</span>
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => startRename(item)}>
                             <Pencil className="w-4 h-4" />
@@ -284,6 +319,44 @@ export function NavMemories({
           )}
         </SheetContent>
       </Sheet>
+
+      {recordDialogOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
+          <div className="bg-white rounded-lg shadow-lg p-4 w-72">
+            <div className="text-sm font-medium mb-2">录制操作</div>
+            <div className="text-xs text-neutral-500 mb-3">
+              输入任务描述，然后手动完成操作。按 Ctrl+S 保存，Ctrl+D 中断。
+            </div>
+            <input
+              autoFocus
+              className="w-full border rounded px-2 py-1.5 text-sm mb-3 outline-none focus:border-blue-400"
+              placeholder="任务描述，例如：发送飞书消息给张三"
+              value={recordInstruction}
+              onChange={(e) => setRecordInstruction(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && recordInstruction.trim())
+                  handleStartRecording();
+                if (e.key === 'Escape') setRecordDialogOpen(false);
+              }}
+            />
+            <div className="flex gap-2 justify-end">
+              <button
+                className="text-xs px-3 py-1.5 rounded border hover:bg-neutral-50"
+                onClick={() => setRecordDialogOpen(false)}
+              >
+                取消
+              </button>
+              <button
+                className="text-xs px-3 py-1.5 rounded bg-red-500 text-white hover:bg-red-600 disabled:opacity-50"
+                disabled={!recordInstruction.trim()}
+                onClick={handleStartRecording}
+              >
+                开始录制
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

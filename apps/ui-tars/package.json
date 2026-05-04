@@ -59,7 +59,8 @@
   "dependencies": {
     "@computer-use/node-mac-permissions": "2.2.2",
     "sharp": "0.33.3",
-    "jose": "^6.0.11"
+    "jose": "^6.0.11",
+    "uiohook-napi": "^1.5.4"
   },
   "devDependencies": {
     "semver": "7.7.2",

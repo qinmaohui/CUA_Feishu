@@ -11,6 +11,7 @@ import { browserRoute } from './browser';
 import { remoteResourceRouter } from './remoteResource';
 import { settingRoute } from './setting';
 import { agentMemoryRoute } from './agentMemory';
+import { recordingRoute } from './recording';
 
 const t = initIpc.create();
 
@@ -23,6 +24,7 @@ export const ipcRoutes = t.router({
   ...browserRoute,
   ...settingRoute,
   ...agentMemoryRoute,
+  ...recordingRoute,
 });
 export type Router = typeof ipcRoutes;
 

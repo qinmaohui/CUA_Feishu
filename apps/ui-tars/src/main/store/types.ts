@@ -31,6 +31,11 @@ export interface MemoryPhase {
   detail?: string;
 }
 
+export type VerifyProgress = {
+  status: 'thinking' | 'done' | 'failed';
+  message: string;
+};
+
 export type AppState = {
   theme: 'dark' | 'light';
   ensurePermissions: { screenCapture?: boolean; accessibility?: boolean };
@@ -50,6 +55,10 @@ export type AppState = {
     total: number;
     currentStep: MemoryStep | null;
   } | null;
+  isRecording: boolean;
+  recordingSteps: MemoryStep[];
+  recordingInstruction: string | null;
+  verifyProgress: VerifyProgress | null;
 };
 
 export enum VlmProvider {
