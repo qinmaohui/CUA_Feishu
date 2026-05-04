@@ -28,7 +28,7 @@ import { useGlobalSettings, GlobalSettings } from '../Settings/global';
 import { useStore } from '../../hooks/useStore';
 import { StatusEnum } from '@ui-tars/sdk';
 import { NavDialog } from '../AlertDialog/navDialog';
-import { api } from '../../api';
+import { api } from '@renderer/api';
 
 export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
   const {
@@ -130,33 +130,9 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
     setNavDialogOpen(false);
   }, []);
 
-  const handleReplay = useCallback(
-    (memory: AgentMemoryItem) => {
-      const operator = memory.operator;
-      const isFree =
-        operator === Operator.RemoteComputer ||
-        operator === Operator.RemoteBrowser;
-
-      const getRouter = () => {
-        if (
-          operator === Operator.RemoteBrowser ||
-          operator === Operator.RemoteComputer
-        ) {
-          return isFree ? '/free-remote' : '/paid-remote';
-        }
-        return '/local';
-      };
-
-      navigate(getRouter(), {
-        state: {
-          operator,
-          from: 'memory',
-          memoryInstruction: memory.instruction,
-        },
-      });
-    },
-    [navigate],
-  );
+  const handleReplay = useCallback(async (memory: AgentMemoryItem) => {
+    await api.replayMemory({ id: memory.id });
+  }, []);
 
   const onSessionDelete = useCallback(
     async (sessionId: string) => {

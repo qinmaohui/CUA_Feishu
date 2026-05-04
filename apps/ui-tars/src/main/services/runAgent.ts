@@ -41,7 +41,11 @@ import { showWidgetWindow } from '../window/ScreenMarker';
 import { hideMainWindow } from '../window';
 import { resetTaskA11yContext, queryAccessibilityTree } from './getDom';
 import { embedInstruction, findTopKSimilarMemories } from './memoryEmbedding';
-import { replayByMemory, checkReplayScreenState } from './replayExecutor';
+import {
+  replayByMemory,
+  checkReplayScreenState,
+  verifyReplayResult,
+} from './replayExecutor';
 
 export const runAgent = async (
   setState: (state: AppState) => void,
@@ -65,10 +69,12 @@ export const runAgent = async (
   // Set feishu-launch phase first so Widget renders before ensureFeishuForeground runs
   setState({
     ...getState(),
+    messages: [],
     memoryPhases: [
       { id: 'feishu', label: '正在激活飞书...', status: 'active' },
     ],
     replayProgress: null,
+    verifyProgress: null,
   });
   await ensureFeishuForeground((patch) =>
     setState({ ...getState(), ...patch }),
@@ -196,7 +202,10 @@ export const runAgent = async (
       ...getState(),
       status,
       restUserData,
-      messages: [...(getState().messages || []), ...conversationsWithSoM],
+      // Append new conversations; skip the final SDK "end" callback which sends conversations: []
+      ...(conversationsWithSoM.length > 0
+        ? { messages: [...getState().messages, ...conversationsWithSoM] }
+        : {}),
     });
   };
 
@@ -442,10 +451,15 @@ When deciding where to click or type:
         setState({ ...getState(), replayProgress: null });
 
         if (replayResult.ok) {
-          logger.info('[runAgent] Replay succeeded, running verification pass');
+          logger.info('[runAgent] Replay succeeded, running VLM verification');
           setState({
             ...getState(),
-            thinkingMsg: '重放成功，验证任务完成情况...',
+            replayProgress: null,
+            thinkingMsg: '重放完成，正在验证任务结果...',
+            verifyProgress: {
+              status: 'thinking',
+              message: '正在截图，调用 VLM 验证任务结果...',
+            },
             memoryPhases: makePhases(
               'replay',
               ['retrieve', 'found', 'check', 'replay'],
@@ -456,12 +470,26 @@ When deciding where to click or type:
               },
             ),
           });
-          pushSystemMessage(
-            `[重放] 成功执行 ${bestMatch.memory.steps.length} 步，正在验证任务结果。`,
-          );
-          runInstruction =
-            `以下步骤已自动重放完成。原始任务："${instructions}"。` +
-            `请检查任务是否已完成。若已完成，调用 finished()。若未完成，从当前状态继续完成任务。`;
+
+          await verifyReplayResult(instructions, (status, message) => {
+            setState({
+              ...getState(),
+              verifyProgress: { status, message },
+            });
+          });
+
+          setState({
+            ...getState(),
+            status: StatusEnum.END,
+            thinkingMsg: '',
+          });
+
+          // 让用户有时间看到验证结果，3 秒后再隐藏 Widget
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+
+          afterAgentRun(settings.operator);
+          resetTaskA11yContext();
+          return;
         } else {
           logger.info(
             '[runAgent] Replay failed at step',
@@ -513,6 +541,16 @@ When deciding where to click or type:
   }
 
   setState({ ...getState(), thinkingMsg: 'Thinking...' });
+
+  // Capture start-state A11y snapshot before the agent runs
+  let startA11ySnapshot: string | undefined;
+  try {
+    const a11yResult = await queryAccessibilityTree({});
+    startA11ySnapshot =
+      a11yResult?.extraction?.extractionText?.slice(0, 2000) ?? undefined;
+  } catch (e) {
+    logger.warn('[runAgent] Failed to capture start A11y snapshot:', e);
+  }
 
   const systemPrompt =
     getSpByModelVersion(modelVersion, language, operatorType) +
@@ -597,18 +635,6 @@ When deciding where to click or type:
     if (steps.length > 0) {
       const instructionEmbedding = await embedInstruction(instructions);
 
-      let startA11ySnapshot: string | undefined;
-      try {
-        const a11yResult = await queryAccessibilityTree({});
-        startA11ySnapshot =
-          a11yResult?.extraction?.extractionText?.slice(0, 2000) ?? undefined;
-      } catch (e) {
-        logger.warn(
-          '[runAgent] Failed to capture A11y snapshot for memory:',
-          e,
-        );
-      }
-
       const now = Date.now();
       AgentMemoryStore.save({
         id: `memory_${now}_${Math.random().toString(36).slice(2, 9)}`,
@@ -634,4 +660,5 @@ When deciding where to click or type:
 
   afterAgentRun(settings.operator);
   resetTaskA11yContext();
+  setState({ ...getState(), verifyProgress: null });
 };

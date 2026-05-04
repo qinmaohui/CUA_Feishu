@@ -15,7 +15,11 @@ import {
 import { ActionIconMap } from '@renderer/const/actions';
 import { useSetting } from '@renderer/hooks/useSetting';
 import { StatusEnum } from '@ui-tars/sdk';
-import type { MemoryPhase, MemoryPhaseStatus } from '@main/store/types';
+import type {
+  MemoryPhase,
+  MemoryPhaseStatus,
+  VerifyProgress,
+} from '@main/store/types';
 import type { MemoryStep } from '@main/store/agentMemory';
 
 import logo from '@resources/logo-full.png?url';
@@ -95,6 +99,19 @@ const MemoryPhasesBlock = ({ phases }: { phases: MemoryPhase[] }) => (
   </div>
 );
 
+const RecordingBlock = ({ stepCount }: { stepCount: number }) => (
+  <div className="mt-3 mb-2 rounded-lg border border-red-200 bg-red-50/80 px-3 py-2">
+    <div className="flex items-center justify-between mb-1">
+      <span className="flex items-center gap-1.5 text-xs font-semibold text-red-600">
+        <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+        正在录制
+      </span>
+      <span className="text-xs text-red-500">{stepCount} 步</span>
+    </div>
+    <div className="text-xs text-gray-400">Ctrl+S 保存 · Ctrl+D 中断</div>
+  </div>
+);
+
 const ReplayProgressBlock = ({
   progress,
 }: {
@@ -129,6 +146,48 @@ const ReplayProgressBlock = ({
   </div>
 );
 
+const VerifyBlock = ({ verify }: { verify: VerifyProgress }) => {
+  const isThinking = verify.status === 'thinking';
+  const isDone = verify.status === 'done';
+  const borderColor = isThinking
+    ? 'border-amber-200'
+    : isDone
+      ? 'border-emerald-200'
+      : 'border-red-200';
+  const bgColor = isThinking
+    ? 'bg-amber-50/80'
+    : isDone
+      ? 'bg-emerald-50/80'
+      : 'bg-red-50/80';
+  const titleColor = isThinking
+    ? 'text-amber-600'
+    : isDone
+      ? 'text-emerald-600'
+      : 'text-red-600';
+
+  return (
+    <div
+      className={`mt-2 mb-2 rounded-lg border ${borderColor} ${bgColor} px-3 py-2`}
+    >
+      <div className="flex items-center gap-1.5 mb-1">
+        {isThinking ? (
+          <Loader2 className="h-3 w-3 text-amber-500 animate-spin" />
+        ) : isDone ? (
+          <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+        ) : (
+          <XCircle className="h-3 w-3 text-red-400" />
+        )}
+        <span className={`text-xs font-semibold ${titleColor}`}>
+          {isThinking ? '验证中...' : isDone ? '验证通过' : '验证未通过'}
+        </span>
+      </div>
+      <div className="text-xs text-gray-500 leading-relaxed">
+        {verify.message}
+      </div>
+    </div>
+  );
+};
+
 const Widget = () => {
   const {
     messages = [],
@@ -136,6 +195,9 @@ const Widget = () => {
     status,
     memoryPhases,
     replayProgress,
+    isRecording,
+    recordingSteps,
+    verifyProgress,
   } = useStore();
   const { settings } = useSetting();
 
@@ -189,7 +251,7 @@ const Widget = () => {
       }) || [];
 
     setActions(ac);
-  }, [messages.length]);
+  }, [messages]);
 
   const toDisplayShortcut = (shortcut?: string) => {
     if (!shortcut) return '';
@@ -263,8 +325,12 @@ const Widget = () => {
 
       {!!errorMsg && <div>{errorMsg}</div>}
 
+      {!!isRecording && (
+        <RecordingBlock stepCount={recordingSteps?.length ?? 0} />
+      )}
       {!!memoryPhases && <MemoryPhasesBlock phases={memoryPhases} />}
       {!!replayProgress && <ReplayProgressBlock progress={replayProgress} />}
+      {!!verifyProgress && <VerifyBlock verify={verifyProgress} />}
 
       {!!actions.length && !errorMsg && (
         <div className="mt-4 max-h-70 overflow-scroll hide_scroll_bar">

@@ -237,6 +237,130 @@ Set "match": false if the page type, active panel, or major UI structure is clea
   }
 };
 
+type VerifyResult = {
+  ok: boolean;
+  reason: string;
+};
+
+export const verifyReplayResult = async (
+  instruction: string,
+  onProgress: (status: 'thinking' | 'done' | 'failed', message: string) => void,
+): Promise<VerifyResult> => {
+  try {
+    const settings = SettingStore.getStore();
+    onProgress('thinking', '正在截图，调用 VLM 验证任务结果...');
+
+    const [screenshot, currentA11y] = await Promise.all([
+      captureFeishuWindow(),
+      queryAccessibilityTree({}).catch(() => null),
+    ]);
+    const currentA11yText = currentA11y?.extraction?.extractionText ?? '';
+
+    if (!settings.vlmBaseUrl || !settings.vlmApiKey || !settings.vlmModelName) {
+      const msg = '未配置 VLM，无法验证任务结果，默认视为完成';
+      logger.warn('[verifyReplayResult]', msg);
+      onProgress('done', msg);
+      return { ok: true, reason: msg };
+    }
+
+    const llmClient = new OpenAI({
+      baseURL: settings.vlmBaseUrl,
+      apiKey: settings.vlmApiKey,
+    });
+
+    const lang = settings.language ?? 'en';
+    const isChinese = lang === 'zh';
+
+    const prompt = isChinese
+      ? `你是一个GUI自动化任务验证器。Agent已完成了一组操作步骤，请根据当前截图和无障碍树，判断以下任务是否已成功完成。
+
+## 任务描述
+${instruction}
+
+## 当前无障碍树
+\`\`\`
+${currentA11yText.slice(0, 2000)}
+\`\`\`
+
+## 当前截图
+（见附图）
+
+仅返回JSON对象，不要有其他内容：
+{
+  "completed": true | false,
+  "reason": "一句话说明判断依据"
+}
+
+若截图中可以看到任务已完成的明确证据（如消息已发送、操作已生效），则 "completed": true。
+若截图中任务明显未完成或出现错误，则 "completed": false。`
+      : `You are a GUI automation task verifier. The agent has finished replaying a set of steps. Based on the current screenshot and accessibility tree, judge whether the following task has been successfully completed.
+
+## Task
+${instruction}
+
+## Current accessibility tree
+\`\`\`
+${currentA11yText.slice(0, 2000)}
+\`\`\`
+
+## Current screenshot
+(attached as image)
+
+Answer with a JSON object only — no markdown, no explanation:
+{
+  "completed": true | false,
+  "reason": "one sentence explaining your decision"
+}`;
+
+    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+      {
+        role: 'user',
+        content: screenshot
+          ? [
+              { type: 'text', text: prompt },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: `data:image/jpeg;base64,${screenshot.base64}`,
+                },
+              },
+            ]
+          : prompt,
+      },
+    ];
+
+    const response = await llmClient.chat.completions.create({
+      model: settings.vlmModelName,
+      messages,
+    });
+
+    const raw = response.choices[0]?.message?.content ?? '';
+    logger.info('[verifyReplayResult] LLM raw:', raw);
+
+    let jsonStr = raw;
+    const fenceMatch = raw.match(/```(?:json)?([\s\S]*?)```/);
+    if (fenceMatch) jsonStr = fenceMatch[1].trim();
+    const braceMatch = jsonStr.match(/\{[\s\S]*\}/);
+    if (braceMatch) jsonStr = braceMatch[0];
+
+    const parsed = JSON.parse(jsonStr) as {
+      completed: boolean;
+      reason: string;
+    };
+    logger.info('[verifyReplayResult] judgment:', parsed);
+
+    const status = parsed.completed ? 'done' : 'failed';
+    const label = parsed.completed ? '✓ 任务已完成' : '✗ 任务未完成';
+    onProgress(status, `${label}：${parsed.reason}`);
+    return { ok: parsed.completed, reason: parsed.reason };
+  } catch (e) {
+    const msg = `VLM 验证失败（${e instanceof Error ? e.message : String(e)}），默认视为完成`;
+    logger.warn('[verifyReplayResult]', msg);
+    onProgress('done', msg);
+    return { ok: true, reason: msg };
+  }
+};
+
 export const replayByMemory = async ({
   operator,
   memorySteps,
