@@ -73,10 +73,16 @@ CUA_Feishu/
 
 相较于原始 UI-TARS-desktop，本项目针对飞书使用场景进行了以下适配：
 
-- **Widget 窗口鼠标穿透**：通过 `setIgnoreMouseEvents(true, { forward: true })` + CSS `pointer-events` 分层控制，实现控制面板窗口的点击穿透，避免遮挡 Agent 操作目标
-- **Overlay 标记窗口优化**：在 Agent 执行动作时临时隐藏预测标记窗口，确保点击不被干扰
-- **无障碍树采集**：新增 `getDom` 服务，定时抓取飞书窗口的 Accessibility Tree 并写入本地日志，为后续数据分析提供基础
-- **飞书UI自动标注**：新增完整的 LLM 粗标注 + 人工矫正流程，Agent 每次截图时自动触发 VLM 对飞书界面进行 UI 元素识别，标注结果持久化存储；前端新增 `/annotation` 标注页面，支持树形结构浏览、元素编辑矫正，可用于构建高质量飞书 UI 数据集
+- **Widget 窗口鼠标穿透**：Widget 窗口通过 `setIgnoreMouseEvents(true, { forward: true })` 全局透传鼠标事件，同时在 CSS 层将 `html/body/#root` 设为 `pointer-events: none`，仅对 `button` 等交互元素恢复 `pointer-events: auto`，实现"控制按钮可点击、背景区域完全穿透"的精细分层控制
+- **Overlay 标记窗口优化**：在 `operator.ts` 的 `execute()` 中，每次执行动作前调用 `hideOverlay()` 隐藏预测标记窗口，动作完成后在 `finally` 块中调用 `showOverlay()` 恢复，避免透明覆盖层拦截鼠标点击；Windows 下的 `type` 动作额外通过剪贴板粘贴方式输入，绕过输入法兼容问题
+- **无障碍树采集**：`getDom` 服务通过动态生成 PowerShell 脚本，调用 Windows UIA（UI Automation）的 `IAccessible` 接口遍历飞书进程的完整控件树，将节点的控件类型、名称、包围盒、可交互状态等字段序列化为 JSON 返回；采集结果可注入 Agent 上下文，辅助 VLM 理解当前界面结构
+- **飞书窗口自动激活**：Agent 执行前自动将飞书窗口置于前台（`ensureFeishuForeground`），避免因窗口遮挡导致操作失败
+- **Agent 记忆系统**：新增完整的任务记忆能力，支持将成功执行的任务步骤持久化为可复用的记忆片段，下次执行相似任务时自动检索并优先回放，显著提升重复任务的执行效率
+  - 基于向量嵌入（embedding）的语义相似度检索，自动匹配历史任务
+  - 记忆回放（replay）：直接重放历史操作步骤，跳过 VLM 推理，速度更快
+  - 手动录制（recording）：用户可手动录制操作步骤并保存为记忆，供 Agent 后续复用
+  - 侧边栏 `NavMemories` 组件：可视化浏览、管理所有已保存的记忆条目
+  - 任务执行阶段可视化：前端实时展示 `memory-search`、`replay`、`agent` 等执行阶段状态
 
 ## License
 
