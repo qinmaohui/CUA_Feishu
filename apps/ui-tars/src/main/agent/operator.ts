@@ -28,7 +28,7 @@ export class NutJSElectronOperator extends NutJSOperator {
       `drag(start_box='[x1, y1, x2, y2]', end_box='[x3, y3, x4, y4]')`,
       `hotkey(key='')`,
       `type(content='') #If you want to submit your input, use "\\n" at the end of \`content\`.`,
-      `scroll(start_box='[x1, y1, x2, y2]', direction='down or up or right or left')`,
+      `scroll(start_box='[x1, y1, x2, y2]', direction='down or up or right or left', scroll_direction_count='3') # scroll_direction_count controls how far to scroll: 1=small nudge, 3=normal page scroll, 5=large jump. If you scrolled too far in a previous step, use a smaller value (e.g. 1 or 2).`,
       `wait() #Sleep for 5s and take a screenshot to check for any changes.`,
       `finished()`,
       `call_user() # Submit the task and call the user when the task is unsolvable, or when you need the user's help.`,

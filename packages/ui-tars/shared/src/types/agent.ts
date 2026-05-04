@@ -74,6 +74,7 @@ export type ActionInputs = Partial<{
   key: string;
   hotkey: string;
   direction: string;
+  scroll_direction_count: string;
   start_coords: Coords;
   end_coords: Coords;
 }>;

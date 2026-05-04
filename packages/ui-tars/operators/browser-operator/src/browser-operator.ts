@@ -530,8 +530,12 @@ export class BrowserOperator extends Operator {
   private async handleScroll(inputs: Record<string, any>) {
     const page = await this.getActivePage();
 
-    const { direction } = inputs;
-    const scrollAmount = 500;
+    const { direction, scroll_direction_count } = inputs;
+    const scrollUnits = Math.max(
+      1,
+      parseInt(scroll_direction_count || '3', 10) || 3,
+    );
+    const scrollAmount = scrollUnits * 100;
 
     this.logger.info(`Scrolling ${direction} by ${scrollAmount}px`);
 

@@ -44,7 +44,7 @@ right_single(start_box='<|box_start|>(x1,y1)<|box_end|>')
 drag(start_box='<|box_start|>(x1,y1)<|box_end|>', end_box='<|box_start|>(x3,y3)<|box_end|>')
 hotkey(key='ctrl c') # Split keys with a space and use lowercase. Also, do not use more than 3 keys in one hotkey action.
 type(content='xxx') # Use escape characters \\', \\", and \\n in content part to ensure we can parse the content in normal python string format. If you want to submit your input, use \\n at the end of content.
-scroll(start_box='<|box_start|>(x1,y1)<|box_end|>', direction='down or up or right or left') # Show more information on the \`direction\` side.
+scroll(start_box='<|box_start|>(x1,y1)<|box_end|>', direction='down or up or right or left', scroll_direction_count='3') # scroll_direction_count controls how far to scroll: 1=small nudge, 3=normal page scroll, 5=large jump. If you scrolled too far in a previous step, use a smaller value (e.g. 1 or 2). If you need to scroll a lot, use a larger value.
 wait() # Sleep for 5s and take a screenshot to check for any changes.
 finished()
 call_user() # Submit the task and call the user when the task is unsolvable, or when you need the user's help.
@@ -75,7 +75,7 @@ right_single(start_box='<|box_start|>(x1,y1)<|box_end|>')
 drag(start_box='<|box_start|>(x1,y1)<|box_end|>', end_box='<|box_start|>(x3,y3)<|box_end|>')
 hotkey(key='ctrl c') # Split keys with a space and use lowercase. Also, do not use more than 3 keys in one hotkey action.
 type(content='xxx') # Use escape characters \\', \\", and \\n in content part to ensure we can parse the content in normal python string format. If you want to submit your input, use \\n at the end of content.
-scroll(start_box='<|box_start|>(x1,y1)<|box_end|>', direction='down or up or right or left') # Show more information on the \`direction\` side.
+scroll(start_box='<|box_start|>(x1,y1)<|box_end|>', direction='down or up or right or left', scroll_direction_count='3') # scroll_direction_count controls how far to scroll: 1=small nudge, 3=normal page scroll, 5=large jump. If you scrolled too far in a previous step, use a smaller value (e.g. 1 or 2). If you need to scroll a lot, use a larger value.
 wait() # Sleep for 5s and take a screenshot to check for any changes.
 finished()
 call_user() # Submit the task and call the user when the task is unsolvable, or when you need the user's help.
@@ -106,7 +106,7 @@ right_single(start_box='[x1, y1, x2, y2]')
 drag(start_box='[x1, y1, x2, y2]', end_box='[x3, y3, x4, y4]')
 hotkey(key='')
 type(content='xxx') # Use escape characters \\', \\", and \n in content part to ensure we can parse the content in normal python string format. If you want to submit your input, use \\n at the end of content.
-scroll(start_box='[x1, y1, x2, y2]', direction='down or up or right or left')
+scroll(start_box='[x1, y1, x2, y2]', direction='down or up or right or left', scroll_direction_count='3') # scroll_direction_count controls how far to scroll: 1=small nudge, 3=normal page scroll, 5=large jump. If you scrolled too far in a previous step, use a smaller value (e.g. 1 or 2). If you need to scroll a lot, use a larger value.
 wait() #Sleep for 5s and take a screenshot to check for any changes.
 finished(content='xxx') # Use escape characters \\', \\", and \n in content part to ensure we can parse the content in normal python string format.
 
@@ -162,7 +162,7 @@ left_double(point='<point>x1 y1</point>')
 right_single(point='<point>x1 y1</point>')
 ${operatorType === 'browser' ? "navigate(content='xxx') # The content is your target web's url\nnavigate_back() # Back to the last page" : ''}
 drag(start_point='<point>x1 y1</point>', end_point='<point>x2 y2</point>')
-scroll(point='<point>x1 y1</point>', direction='down or up or right or left') # Show more information on the \`direction\` side.
+scroll(point='<point>x1 y1</point>', direction='down or up or right or left', scroll_direction_count='3') # scroll_direction_count controls how far to scroll: 1=small nudge, 3=normal page scroll, 5=large jump. If you scrolled too far in a previous step, use a smaller value (e.g. 1 or 2). If you need to scroll a lot, use a larger value.
 hotkey(key='ctrl c') # Split keys with a space and use lowercase. Also, do not use more than 3 keys in one hotkey action.
 press(key='ctrl') # Presses and holds down ONE key (e.g., ctrl). Use this action in combination with release(). You can perform other actions between press and release. For example, click elements while holding the ctrl key.
 release(key='ctrl') # Releases the key previously pressed. All actions between press and release will execute with the key held down. Note: Ensure all keys are released by the end of the step.

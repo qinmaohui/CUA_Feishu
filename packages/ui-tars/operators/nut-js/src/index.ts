@@ -291,7 +291,11 @@ export class NutJSOperator extends Operator {
       }
 
       case 'scroll': {
-        const { direction } = action_inputs;
+        const { direction, scroll_direction_count } = action_inputs;
+        const scrollUnits = Math.max(
+          1,
+          parseInt(scroll_direction_count || '3', 10) || 3,
+        );
         // if startX and startY is not null, move mouse to startX, startY
         if (startX !== null && startY !== null) {
           await moveStraightTo(startX, startY);
@@ -299,10 +303,10 @@ export class NutJSOperator extends Operator {
 
         switch (direction?.toLowerCase()) {
           case 'up':
-            await mouse.scrollUp(5 * 100);
+            await mouse.scrollUp(scrollUnits * 100);
             break;
           case 'down':
-            await mouse.scrollDown(5 * 100);
+            await mouse.scrollDown(scrollUnits * 100);
             break;
           default:
             console.warn(
