@@ -14,6 +14,7 @@ import { SettingStore } from '@main/store/setting';
 
 type ReplayResult = {
   ok: boolean;
+  aborted?: boolean;
   failStep?: number;
   reason?: string;
 };
@@ -240,27 +241,43 @@ Set "match": false if the page type, active panel, or major UI structure is clea
 type VerifyResult = {
   ok: boolean;
   reason: string;
+  screenshotBase64?: string;
+  a11ySnapshot?: string;
 };
 
 export const verifyReplayResult = async (
   instruction: string,
   onProgress: (status: 'thinking' | 'done' | 'failed', message: string) => void,
+  options?: { screenshotBase64?: string },
 ): Promise<VerifyResult> => {
+  let screenshot: { base64: string } | null = null;
+  let currentA11yText = '';
+
   try {
     const settings = SettingStore.getStore();
     onProgress('thinking', '正在截图，调用 VLM 验证任务结果...');
 
-    const [screenshot, currentA11y] = await Promise.all([
-      captureFeishuWindow(),
-      queryAccessibilityTree({}).catch(() => null),
-    ]);
-    const currentA11yText = currentA11y?.extraction?.extractionText ?? '';
+    // 优先使用传入的截图，否则尝试自行截取
+    if (options?.screenshotBase64) {
+      screenshot = { base64: options.screenshotBase64 };
+    } else {
+      const captured = await captureFeishuWindow();
+      if (captured) screenshot = { base64: captured.base64 };
+    }
+
+    const currentA11y = await queryAccessibilityTree({}).catch(() => null);
+    currentA11yText = currentA11y?.extraction?.extractionText ?? '';
 
     if (!settings.vlmBaseUrl || !settings.vlmApiKey || !settings.vlmModelName) {
       const msg = '未配置 VLM，无法验证任务结果，默认视为完成';
       logger.warn('[verifyReplayResult]', msg);
       onProgress('done', msg);
-      return { ok: true, reason: msg };
+      return {
+        ok: true,
+        reason: msg,
+        screenshotBase64: screenshot?.base64,
+        a11ySnapshot: currentA11yText,
+      };
     }
 
     const llmClient = new OpenAI({
@@ -271,16 +288,21 @@ export const verifyReplayResult = async (
     const lang = settings.language ?? 'en';
     const isChinese = lang === 'zh';
 
+    const a11ySection = isChinese
+      ? currentA11yText
+        ? `## 当前无障碍树\n\`\`\`\n${currentA11yText.slice(0, 2000)}\n\`\`\``
+        : '## 当前无障碍树\n（不可用，请仅根据截图判断）'
+      : currentA11yText
+        ? `## Current accessibility tree\n\`\`\`\n${currentA11yText.slice(0, 2000)}\n\`\`\``
+        : '## Current accessibility tree\n(Unavailable. Judge from the screenshot only.)';
+
     const prompt = isChinese
       ? `你是一个GUI自动化任务验证器。Agent已完成了一组操作步骤，请根据当前截图和无障碍树，判断以下任务是否已成功完成。
 
 ## 任务描述
 ${instruction}
 
-## 当前无障碍树
-\`\`\`
-${currentA11yText.slice(0, 2000)}
-\`\`\`
+${a11ySection}
 
 ## 当前截图
 （见附图）
@@ -298,10 +320,7 @@ ${currentA11yText.slice(0, 2000)}
 ## Task
 ${instruction}
 
-## Current accessibility tree
-\`\`\`
-${currentA11yText.slice(0, 2000)}
-\`\`\`
+${a11ySection}
 
 ## Current screenshot
 (attached as image)
@@ -352,22 +371,34 @@ Answer with a JSON object only — no markdown, no explanation:
     const status = parsed.completed ? 'done' : 'failed';
     const label = parsed.completed ? '✓ 任务已完成' : '✗ 任务未完成';
     onProgress(status, `${label}：${parsed.reason}`);
-    return { ok: parsed.completed, reason: parsed.reason };
+    return {
+      ok: parsed.completed,
+      reason: parsed.reason,
+      screenshotBase64: screenshot?.base64,
+      a11ySnapshot: currentA11yText,
+    };
   } catch (e) {
     const msg = `VLM 验证失败（${e instanceof Error ? e.message : String(e)}），默认视为完成`;
     logger.warn('[verifyReplayResult]', msg);
     onProgress('done', msg);
-    return { ok: true, reason: msg };
+    return {
+      ok: true,
+      reason: msg,
+      screenshotBase64: screenshot?.base64,
+      a11ySnapshot: currentA11yText,
+    };
   }
 };
 
 export const replayByMemory = async ({
   operator,
   memorySteps,
+  signal,
   onStepStart,
 }: {
   operator: BaseOperator;
   memorySteps: MemoryStep[];
+  signal?: AbortSignal;
   onStepStart?: (stepIndex: number, step: MemoryStep) => void;
 }): Promise<ReplayResult> => {
   if (!memorySteps.length) {
@@ -377,9 +408,26 @@ export const replayByMemory = async ({
     };
   }
 
+  if (signal?.aborted) {
+    return {
+      ok: false,
+      aborted: true,
+      reason: 'Replay aborted before start',
+    };
+  }
+
   const { width, height, scaleFactor } = await getScreenContext(operator);
 
   for (let i = 0; i < memorySteps.length; i += 1) {
+    if (signal?.aborted) {
+      return {
+        ok: false,
+        aborted: true,
+        failStep: i,
+        reason: 'Replay aborted',
+      };
+    }
+
     const step = memorySteps[i];
     onStepStart?.(i, step);
     const parsedPrediction = toPrediction(step);
@@ -401,7 +449,24 @@ export const replayByMemory = async ({
           reason: `Step returned failed status: ${step.action_type}`,
         };
       }
+
+      if (signal?.aborted) {
+        return {
+          ok: false,
+          aborted: true,
+          failStep: i,
+          reason: 'Replay aborted',
+        };
+      }
     } catch (error) {
+      if (signal?.aborted) {
+        return {
+          ok: false,
+          aborted: true,
+          failStep: i,
+          reason: 'Replay aborted',
+        };
+      }
       logger.warn('[replayByMemory] Step failed:', i, step.action_type, error);
       return {
         ok: false,

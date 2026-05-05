@@ -728,6 +728,14 @@ export function resetTaskA11yContext(): void {
   contextGeneration = 0;
 }
 
+/**
+ * Returns the latest extracted A11Y context text that was injected for VLM.
+ * This lets caller-side logs/reports persist the same snapshot used at runtime.
+ */
+export function getLatestTaskA11yContextSnapshot(): string | undefined {
+  return taskA11yContext?.extractionText;
+}
+
 export async function queryAccessibilityTree(
   input: QueryA11yTreeInput,
   screenSize?: ScreenSize,

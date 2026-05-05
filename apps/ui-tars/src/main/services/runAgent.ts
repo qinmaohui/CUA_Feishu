@@ -39,13 +39,30 @@ import { UITarsModelConfig } from '@ui-tars/sdk/core';
 import { runAutoAnnotation, ensureFeishuForeground } from './feishuAnnotation';
 import { showWidgetWindow } from '../window/ScreenMarker';
 import { hideMainWindow } from '../window';
-import { resetTaskA11yContext, queryAccessibilityTree } from './getDom';
+import {
+  resetTaskA11yContext,
+  queryAccessibilityTree,
+  getLatestTaskA11yContextSnapshot,
+} from './getDom';
 import { embedInstruction, findTopKSimilarMemories } from './memoryEmbedding';
 import {
   replayByMemory,
   checkReplayScreenState,
   verifyReplayResult,
 } from './replayExecutor';
+
+const A11Y_CONTEXT_PREFIX = '[A11Y_CONTEXT]';
+
+const getRecentA11yFromMessages = (
+  messages: ConversationWithSoM[],
+  beforeIndex: number,
+): string | undefined =>
+  [...messages.slice(0, beforeIndex)]
+    .reverse()
+    .find(
+      (m) =>
+        typeof m.value === 'string' && m.value.startsWith(A11Y_CONTEXT_PREFIX),
+    )?.value;
 
 export const runAgent = async (
   setState: (state: AppState) => void,
@@ -145,9 +162,14 @@ export const runAgent = async (
     }
 
     // add SoM to conversations
+    const latestA11ySnapshot = getLatestTaskA11yContextSnapshot();
     const conversationsWithSoM: ConversationWithSoM[] = await Promise.all(
       conversations.map(async (conv) => {
-        const { screenshotContext, predictionParsed } = conv;
+        const convWithSoM = conv as ConversationWithSoM;
+        const { screenshotContext, predictionParsed } = convWithSoM;
+        const a11ySnapshot =
+          convWithSoM.a11ySnapshot ??
+          (predictionParsed?.length ? latestA11ySnapshot : undefined);
         if (
           lastConv?.screenshotBase64 &&
           screenshotContext?.size &&
@@ -162,11 +184,15 @@ export const runAgent = async (
             return '';
           });
           return {
-            ...conv,
+            ...convWithSoM,
+            a11ySnapshot,
             screenshotBase64WithElementMarker,
           };
         }
-        return conv;
+        return {
+          ...convWithSoM,
+          ...(a11ySnapshot ? { a11ySnapshot } : {}),
+        };
       }),
     ).catch((e) => {
       logger.error('[conversationsWithSoM error]:', e);
@@ -619,18 +645,32 @@ When deciding where to click or type:
   // Memory: save successful run as reusable memory
   const finalState = getState();
   if (finalState.status === StatusEnum.END) {
-    const steps: MemoryStep[] = finalState.messages
-      .flatMap((conv) => conv.predictionParsed ?? [])
-      .filter(
-        (p) =>
-          p.action_type && !['screenshot', 'finished'].includes(p.action_type),
-      )
-      .map((p) => ({
-        action_type: p.action_type,
-        action_inputs: (p.action_inputs ?? {}) as Record<string, unknown>,
-        thought: p.thought ?? '',
-        reflection: p.reflection ?? null,
-      }));
+    const steps: MemoryStep[] = [];
+    for (let i = 0; i < finalState.messages.length; i += 1) {
+      const conv = finalState.messages[i];
+      const parsed = conv.predictionParsed ?? [];
+      if (!parsed.length) continue;
+      const recentA11y = getRecentA11yFromMessages(finalState.messages, i);
+
+      for (const p of parsed) {
+        if (
+          !p.action_type ||
+          ['screenshot', 'finished'].includes(p.action_type)
+        ) {
+          continue;
+        }
+
+        steps.push({
+          action_type: p.action_type,
+          action_inputs: (p.action_inputs ?? {}) as Record<string, unknown>,
+          thought: p.thought ?? '',
+          reflection: p.reflection ?? null,
+          screenshotBase64: conv.screenshotBase64,
+          screenshotWithMarker: conv.screenshotBase64WithElementMarker,
+          a11ySnapshot: conv.a11ySnapshot ?? recentA11y,
+        });
+      }
+    }
 
     if (steps.length > 0) {
       const instructionEmbedding = await embedInstruction(instructions);

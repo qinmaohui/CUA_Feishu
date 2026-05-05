@@ -8,6 +8,9 @@ export interface MemoryStep {
   action_inputs: Record<string, unknown>;
   thought: string;
   reflection: string | null;
+  screenshotBase64?: string;
+  screenshotWithMarker?: string;
+  a11ySnapshot?: string;
 }
 
 export interface AgentMemoryItem {

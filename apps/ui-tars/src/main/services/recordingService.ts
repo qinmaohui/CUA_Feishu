@@ -4,13 +4,17 @@ import { logger } from '@main/logger';
 import { AgentMemoryStore } from '@main/store/agentMemory';
 import type { MemoryStep } from '@main/store/agentMemory';
 import { embedInstruction } from './memoryEmbedding';
-import { queryAccessibilityTree } from './getDom';
+import {
+  queryAccessibilityTree,
+  getLatestTaskA11yContextSnapshot,
+} from './getDom';
 import { SettingStore } from '@main/store/setting';
 import { store } from '@main/store/create';
 import { getScreenSize } from '@main/utils/screen';
+import { captureFeishuWindow } from './feishuAnnotation';
 
 // Modifier key scancodes — filter these out to avoid recording bare Ctrl/Alt/Shift/Meta keydowns
-const MODIFIER_KEYCODES = new Set([
+const MODIFIER_KEYCODES = new Set<number>([
   UiohookKey.Ctrl,
   UiohookKey.CtrlRight,
   UiohookKey.Alt,
@@ -124,6 +128,8 @@ class RecordingService {
   private lastClickX = 0;
   private lastClickY = 0;
   private active = false;
+  private isStopping = false;
+  private actionQueue: Promise<void> = Promise.resolve();
   private startA11ySnapshot: string | undefined = undefined;
 
   private getState() {
@@ -132,6 +138,22 @@ class RecordingService {
 
   private setState(patch: Partial<ReturnType<typeof store.getState>>) {
     store.setState({ ...this.getState(), ...patch });
+  }
+
+  private enqueueAction(task: () => Promise<void> | void) {
+    if (!this.active || this.isStopping) return;
+    this.actionQueue = this.actionQueue
+      .then(async () => {
+        if (!this.active || this.isStopping) return;
+        await task();
+      })
+      .catch((e) => {
+        logger.error('[RecordingService] queued action failed:', e);
+      });
+  }
+
+  private async drainQueue() {
+    await this.actionQueue.catch(() => undefined);
   }
 
   private normalizeBox(x: number, y: number): string {
@@ -147,9 +169,41 @@ class RecordingService {
     });
   }
 
-  private flushTextBuffer() {
-    if (!this.textBuffer) return;
+  private async getRuntimeStepEvidence() {
+    const a11ySnapshot = getLatestTaskA11yContextSnapshot();
+
+    try {
+      const screenshot = await captureFeishuWindow();
+      return {
+        screenshotBase64: screenshot?.base64,
+        a11ySnapshot,
+      };
+    } catch (e) {
+      logger.warn(
+        '[RecordingService] Failed to capture screenshot for step:',
+        e,
+      );
+      return {
+        screenshotBase64: undefined,
+        a11ySnapshot,
+      };
+    }
+  }
+
+  private async pushStepWithEvidence(
+    step: Omit<MemoryStep, 'screenshotBase64' | 'a11ySnapshot'>,
+  ) {
+    const evidence = await this.getRuntimeStepEvidence();
     this.pushStep({
+      ...step,
+      screenshotBase64: evidence.screenshotBase64,
+      a11ySnapshot: evidence.a11ySnapshot,
+    });
+  }
+
+  private async flushTextBuffer() {
+    if (!this.textBuffer) return;
+    await this.pushStepWithEvidence({
       action_type: 'type',
       action_inputs: { content: this.textBuffer },
       thought: '',
@@ -161,6 +215,8 @@ class RecordingService {
   start(instruction: string) {
     if (this.active) return;
     this.active = true;
+    this.isStopping = false;
+    this.actionQueue = Promise.resolve();
     this.textBuffer = '';
     this.startA11ySnapshot = undefined;
     this.setState({
@@ -180,7 +236,7 @@ class RecordingService {
       });
 
     uIOhook.on('mousedown', (e: UiohookMouseEvent) => {
-      if (!this.active) return;
+      if (!this.active || this.isStopping) return;
       const now = Date.now();
       const btn = e.button as number;
       const isDoubleClick =
@@ -192,37 +248,40 @@ class RecordingService {
         ? 'double_click'
         : ({ 1: 'click', 2: 'right_click', 3: 'middle_click' }[btn] ?? 'click');
 
-      this.flushTextBuffer();
-      this.pushStep({
-        action_type: actionType,
-        action_inputs: { start_box: this.normalizeBox(e.x, e.y) },
-        thought: '',
-        reflection: null,
-      });
       this.lastClickTime = now;
       this.lastClickX = e.x;
       this.lastClickY = e.y;
+
+      this.enqueueAction(async () => {
+        await this.flushTextBuffer();
+        await this.pushStepWithEvidence({
+          action_type: actionType,
+          action_inputs: { start_box: this.normalizeBox(e.x, e.y) },
+          thought: '',
+          reflection: null,
+        });
+      });
     });
 
     uIOhook.on('wheel', (e) => {
-      if (!this.active) return;
-      this.flushTextBuffer();
-      this.pushStep({
-        action_type: 'scroll',
-        action_inputs: {
-          start_box: this.normalizeBox(e.x, e.y),
-          direction: e.rotation > 0 ? 'down' : 'up',
-          coordinate: [e.x, e.y],
-        },
-        thought: '',
-        reflection: null,
+      if (!this.active || this.isStopping) return;
+      this.enqueueAction(async () => {
+        await this.flushTextBuffer();
+        await this.pushStepWithEvidence({
+          action_type: 'scroll',
+          action_inputs: {
+            start_box: this.normalizeBox(e.x, e.y),
+            direction: e.rotation > 0 ? 'down' : 'up',
+            coordinate: [e.x, e.y],
+          },
+          thought: '',
+          reflection: null,
+        });
       });
     });
 
     uIOhook.on('keydown', (e) => {
       if (!this.active) return;
-      // Skip bare modifier key presses
-      if (MODIFIER_KEYCODES.has(e.keycode)) return;
 
       if (e.ctrlKey && e.keycode === UiohookKey.S) {
         this.save();
@@ -233,15 +292,20 @@ class RecordingService {
         return;
       }
 
+      if (this.isStopping) return;
+      // Skip bare modifier key presses
+      if (MODIFIER_KEYCODES.has(e.keycode)) return;
+
       const hasModifier = e.ctrlKey || e.altKey || e.metaKey;
       const char = KEYCODE_TO_CHAR[e.keycode];
 
       if (!hasModifier && char !== undefined) {
-        this.textBuffer += e.shiftKey ? char.toUpperCase() : char;
+        const nextChar = e.shiftKey ? char.toUpperCase() : char;
+        this.enqueueAction(() => {
+          this.textBuffer += nextChar;
+        });
         return;
       }
-
-      this.flushTextBuffer();
 
       const parts: string[] = [];
       if (e.ctrlKey) parts.push('ctrl');
@@ -251,11 +315,14 @@ class RecordingService {
       const keyName = KEYCODE_TO_NAME[e.keycode] ?? `key${e.keycode}`;
       parts.push(keyName);
 
-      this.pushStep({
-        action_type: 'hotkey',
-        action_inputs: { key: parts.join('+') },
-        thought: '',
-        reflection: null,
+      this.enqueueAction(async () => {
+        await this.flushTextBuffer();
+        await this.pushStepWithEvidence({
+          action_type: 'hotkey',
+          action_inputs: { key: parts.join('+') },
+          thought: '',
+          reflection: null,
+        });
       });
     });
 
@@ -264,8 +331,10 @@ class RecordingService {
   }
 
   async save() {
-    if (!this.active) return;
-    this.flushTextBuffer();
+    if (!this.active || this.isStopping) return;
+    this.isStopping = true;
+    await this.drainQueue();
+    await this.flushTextBuffer();
     this.stop();
 
     const { recordingSteps, recordingInstruction } = this.getState();
@@ -278,6 +347,7 @@ class RecordingService {
         recordingSteps: [],
         recordingInstruction: null,
       });
+      this.isStopping = false;
       return;
     }
 
@@ -312,16 +382,20 @@ class RecordingService {
       recordingSteps: [],
       recordingInstruction: null,
     });
+    this.isStopping = false;
   }
 
-  discard() {
-    if (!this.active) return;
+  async discard() {
+    if (!this.active || this.isStopping) return;
+    this.isStopping = true;
+    await this.drainQueue();
     this.stop();
     this.setState({
       isRecording: false,
       recordingSteps: [],
       recordingInstruction: null,
     });
+    this.isStopping = false;
     logger.info('[RecordingService] Recording discarded');
   }
 
