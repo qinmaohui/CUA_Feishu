@@ -12,6 +12,7 @@ import { showWindow } from '@main/window/index';
 import { closeScreenMarker } from '@main/window/ScreenMarker';
 import { GUIAgent } from '@ui-tars/sdk';
 import { Operator } from '@ui-tars/sdk/core';
+import { requestGlobalStop } from '@main/services/runStop';
 
 const t = initIpc.create();
 
@@ -69,7 +70,8 @@ export const triggerTogglePauseRun = () => {
 
 export const triggerStopRun = () => {
   const { abortController } = store.getState();
-  store.setState({ status: StatusEnum.END, thinking: false });
+  requestGlobalStop();
+  store.setState({ status: StatusEnum.USER_STOPPED, thinking: false });
 
   showWindow();
 

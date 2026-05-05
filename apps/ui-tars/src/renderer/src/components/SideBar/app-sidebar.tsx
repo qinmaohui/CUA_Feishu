@@ -19,6 +19,7 @@ import { useSession } from '@renderer//hooks/useSession';
 
 import { NavHistory } from './nav-history';
 import { NavMemories } from './nav-memories';
+import { NavBatchTest } from './nav-batch-test';
 import { NavSettings } from './nav-footer';
 import { UITarsHeader } from './nav-header';
 
@@ -168,6 +169,7 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
             onSessionDelete={onSessionDelete}
           />
           <NavMemories onReplay={handleReplay} />
+          <NavBatchTest onClick={() => navigate('/batch-test')} />
         </SidebarContent>
         <SidebarFooter className="p-0">
           <NavSettings onClick={openSettings} />
