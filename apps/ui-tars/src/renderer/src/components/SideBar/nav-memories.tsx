@@ -8,6 +8,7 @@ import {
   Play,
   Circle,
   RefreshCw,
+  XCircle,
 } from 'lucide-react';
 
 import {
@@ -33,11 +34,11 @@ import {
   CollapsibleTrigger,
 } from '@renderer/components/ui/collapsible';
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from '@renderer/components/ui/sheet';
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@renderer/components/ui/dialog';
 import { useAgentMemoryStore } from '@renderer/store/agentMemory';
 import type { AgentMemoryItem } from '@main/store/agentMemory';
 import { useStore } from '@renderer/hooks/useStore';
@@ -96,6 +97,15 @@ const formatActionInputs = (
   }
 };
 
+const toDataUrl = (base64?: string): string | null => {
+  if (!base64 || !base64.trim()) {
+    return null;
+  }
+  return base64.startsWith('data:image')
+    ? base64
+    : `data:image/png;base64,${base64}`;
+};
+
 export function NavMemories({
   onReplay,
 }: {
@@ -111,6 +121,7 @@ export function NavMemories({
   );
   const [recordDialogOpen, setRecordDialogOpen] = useState(false);
   const [recordInstruction, setRecordInstruction] = useState('');
+  const [selectedStep, setSelectedStep] = useState(0);
   const { isRecording } = useStore();
   const { setOpen, state } = useSidebar();
 
@@ -151,6 +162,16 @@ export function NavMemories({
     setRecordInstruction(memory.instruction);
     setRecordDialogOpen(true);
   };
+
+  const detailStep =
+    detailMemory && detailMemory.steps.length > 0
+      ? detailMemory.steps[
+          Math.min(selectedStep, detailMemory.steps.length - 1)
+        ]
+      : null;
+  const detailStepImage = detailStep
+    ? toDataUrl(detailStep.screenshotWithMarker ?? detailStep.screenshotBase64)
+    : null;
 
   return (
     <>
@@ -196,7 +217,10 @@ export function NavMemories({
                     <SidebarMenuSubItem key={item.id} className="group/item">
                       <SidebarMenuSubButton
                         className="hover:bg-neutral-100 hover:text-neutral-600 py-5 cursor-pointer text-neutral-500"
-                        onClick={() => setDetailMemory(item)}
+                        onClick={() => {
+                          setDetailMemory(item);
+                          setSelectedStep(0);
+                        }}
                       >
                         <Brain className="w-4 h-4 shrink-0" />
                         {editingId === item.id ? (
@@ -263,62 +287,146 @@ export function NavMemories({
         </SidebarMenu>
       </SidebarGroup>
 
-      <Sheet
+      <Dialog
         open={!!detailMemory}
         onOpenChange={(open) => !open && setDetailMemory(null)}
       >
-        <SheetContent side="left" className="w-80 overflow-y-auto">
+        <DialogContent className="p-0 w-[min(1280px,96vw)] max-w-[96vw] h-[min(860px,90vh)] overflow-hidden gap-0">
           {detailMemory && (
             <>
-              <SheetHeader>
-                <SheetTitle className="text-base leading-snug break-words">
-                  {detailMemory.name}
-                </SheetTitle>
-              </SheetHeader>
+              <div className="flex h-full flex-col bg-white">
+                <div className="flex items-center justify-between border-b px-5 py-4 shrink-0">
+                  <div>
+                    <DialogHeader className="p-0 text-left">
+                      <DialogTitle className="text-base leading-snug break-words">
+                        {detailMemory.name}
+                      </DialogTitle>
+                    </DialogHeader>
+                    <p className="mt-1 text-xs text-neutral-500 break-words">
+                      {detailMemory.instruction}
+                    </p>
+                    <p className="mt-2 text-xs text-neutral-400">
+                      成功 {detailMemory.successMeta.successCount} 次 · 最近:{' '}
+                      {formatDate(detailMemory.successMeta.lastSuccessAt)}
+                    </p>
+                  </div>
+                  <button
+                    className="text-neutral-400 hover:text-neutral-600 p-1 rounded-lg hover:bg-neutral-100 transition-colors"
+                    onClick={() => setDetailMemory(null)}
+                  >
+                    <XCircle className="w-4 h-4" />
+                  </button>
+                </div>
 
-              <p className="mt-2 text-xs text-neutral-500 break-words">
-                {detailMemory.instruction}
-              </p>
-
-              <p className="mt-3 text-xs text-neutral-400">
-                成功 {detailMemory.successMeta.successCount} 次 · 最近:{' '}
-                {formatDate(detailMemory.successMeta.lastSuccessAt)}
-              </p>
-
-              <div className="mt-4">
-                <p className="text-xs font-medium text-neutral-600 mb-2">
-                  操作步骤
-                </p>
-                <ol className="space-y-3">
-                  {detailMemory.steps.map((step, i) => {
-                    const detail = formatActionInputs(
-                      step.action_type,
-                      step.action_inputs as Record<string, unknown>,
-                    );
-                    return (
-                      <li key={i} className="text-xs text-neutral-500">
-                        <div className="font-medium text-neutral-700">
-                          {i + 1}. [{step.action_type}]
-                          {detail && (
-                            <span className="ml-1 text-neutral-500 font-normal">
-                              {detail}
+                {detailMemory.steps.length === 0 ? (
+                  <div className="flex-1 flex items-center justify-center text-neutral-400 text-sm">
+                    No step data recorded
+                  </div>
+                ) : (
+                  <div className="flex flex-1 overflow-hidden">
+                    <div className="w-56 border-r overflow-y-auto shrink-0">
+                      {detailMemory.steps.map((step, i) => (
+                        <button
+                          key={`${detailMemory.id}_step_${i}`}
+                          onClick={() => setSelectedStep(i)}
+                          className={`w-full text-left px-3 py-2.5 border-b last:border-0 transition-colors ${
+                            selectedStep === i
+                              ? 'bg-blue-50 border-l-2 border-l-blue-500'
+                              : 'hover:bg-neutral-50 border-l-2 border-l-transparent'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs text-neutral-400 shrink-0">
+                              #{i + 1}
                             </span>
-                          )}
-                        </div>
-                        {step.thought && (
-                          <div className="mt-0.5 pl-3 text-neutral-400 leading-relaxed">
-                            {step.thought}
+                            <span className="text-xs font-medium text-neutral-700 truncate">
+                              {step.action_type}
+                            </span>
+                          </div>
+                          <span className="text-xs text-neutral-400 mt-0.5 block truncate">
+                            {formatActionInputs(
+                              step.action_type,
+                              step.action_inputs as Record<string, unknown>,
+                            ) || '—'}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+
+                    {detailStep && (
+                      <div className="flex-1 overflow-y-auto p-5 space-y-4 bg-neutral-50/50">
+                        {detailStepImage && (
+                          <div>
+                            <p className="text-xs font-medium text-neutral-500 mb-2">
+                              截图
+                            </p>
+                            <img
+                              src={detailStepImage}
+                              alt={`${detailMemory.name}-step-${selectedStep + 1}`}
+                              className="w-full rounded-lg border object-contain max-h-[360px] bg-white"
+                            />
                           </div>
                         )}
-                      </li>
-                    );
-                  })}
-                </ol>
+
+                        <div className="bg-neutral-50 rounded-lg p-3">
+                          <p className="text-xs font-medium text-neutral-500 mb-1">
+                            操作
+                          </p>
+                          <span className="inline-block bg-blue-100 text-blue-700 text-xs font-medium px-2 py-0.5 rounded mr-2">
+                            {detailStep.action_type}
+                          </span>
+                          <span className="text-xs text-neutral-600">
+                            {formatActionInputs(
+                              detailStep.action_type,
+                              detailStep.action_inputs as Record<
+                                string,
+                                unknown
+                              >,
+                            ) || '—'}
+                          </span>
+                        </div>
+
+                        {detailStep.thought && (
+                          <div>
+                            <p className="text-xs font-medium text-neutral-500 mb-1">
+                              思考过程
+                            </p>
+                            <p className="text-xs text-neutral-600 leading-relaxed bg-amber-50 border border-amber-100 rounded-lg p-3 whitespace-pre-wrap">
+                              {detailStep.thought}
+                            </p>
+                          </div>
+                        )}
+
+                        {detailStep.reflection && (
+                          <div>
+                            <p className="text-xs font-medium text-neutral-500 mb-1">
+                              反思
+                            </p>
+                            <p className="text-xs text-neutral-600 leading-relaxed bg-purple-50 border border-purple-100 rounded-lg p-3 whitespace-pre-wrap">
+                              {detailStep.reflection}
+                            </p>
+                          </div>
+                        )}
+
+                        {detailStep.a11ySnapshot && (
+                          <div>
+                            <p className="text-xs font-medium text-neutral-500 mb-1">
+                              无障碍树（当时提供给 VLM 的 A11Y_CONTEXT）
+                            </p>
+                            <pre className="text-xs text-neutral-600 leading-relaxed bg-white border rounded-lg p-3 whitespace-pre-wrap max-h-72 overflow-auto">
+                              {detailStep.a11ySnapshot}
+                            </pre>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </>
           )}
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
 
       {recordDialogOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
