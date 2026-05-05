@@ -222,7 +222,7 @@ const Home = () => {
               </Button>
             </CardFooter>
           </Card>
-          <Card className="w-[400px] py-5">
+          {/* <Card className="w-[400px] py-5">
             <CardHeader className="px-5">
               <CardTitle>飞书UI自动标注</CardTitle>
               <CardDescription>
@@ -242,7 +242,7 @@ const Home = () => {
                 进入标注页面
               </Button>
             </CardFooter>
-          </Card>
+          </Card> */}
         </div>
         <LocalSettingsDialog
           isOpen={localConfig.open}
