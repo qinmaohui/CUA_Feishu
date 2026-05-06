@@ -220,6 +220,18 @@ class ScreenMarker {
     this.screenWaterFlow = null;
   }
 
+  hideWidgetForScreenshot() {
+    if (this.widgetWindow && !this.widgetWindow.isDestroyed()) {
+      this.widgetWindow.hide();
+    }
+  }
+
+  showWidgetAfterScreenshot() {
+    if (this.widgetWindow && !this.widgetWindow.isDestroyed()) {
+      this.widgetWindow.show();
+    }
+  }
+
   hideWidgetWindow() {
     this.unregisterWidgetShortcuts();
     this.widgetWindow?.close();
@@ -254,7 +266,6 @@ class ScreenMarker {
     });
 
     this.widgetWindow.setFocusable(false);
-    this.widgetWindow.setContentProtection(true); // not show for vlm model
     // Enable mouse passthrough — most of the window area lets clicks through,
     // but interactive elements (buttons) with pointer-events: auto still capture.
     this.widgetWindow.setIgnoreMouseEvents(true, { forward: true });
@@ -425,6 +436,14 @@ export const showWidgetWindow = () => {
 
 export const hideWidgetWindow = () => {
   ScreenMarker.getInstance().hideWidgetWindow();
+};
+
+export const hideWidgetForScreenshot = () => {
+  ScreenMarker.getInstance().hideWidgetForScreenshot();
+};
+
+export const showWidgetAfterScreenshot = () => {
+  ScreenMarker.getInstance().showWidgetAfterScreenshot();
 };
 
 export const showScreenWaterFlow = () => {

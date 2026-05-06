@@ -16,7 +16,12 @@ import * as env from '@main/env';
 import { logger } from '@main/logger';
 import { sleep } from '@ui-tars/shared/utils';
 import { getScreenSize } from '@main/utils/screen';
-import { hideOverlay, showOverlay } from '@main/window/ScreenMarker';
+import {
+  hideOverlay,
+  showOverlay,
+  hideWidgetForScreenshot,
+  showWidgetAfterScreenshot,
+} from '@main/window/ScreenMarker';
 import { queryAccessibilityTree } from '@main/services/getDom';
 
 export class NutJSElectronOperator extends NutJSOperator {
@@ -37,11 +42,18 @@ export class NutJSElectronOperator extends NutJSOperator {
 
   async getA11ySnapshot(): Promise<string> {
     const { physicalSize, scaleFactor } = getScreenSize();
+    const logicalW = Math.round(physicalSize.width / scaleFactor);
+    const logicalH = Math.round(physicalSize.height / scaleFactor);
+    logger.info(
+      `[a11y-snapshot] screenSize: physical=${physicalSize.width}x${physicalSize.height} scale=${scaleFactor} logical=${logicalW}x${logicalH}`,
+    );
     const result = await queryAccessibilityTree(
       {},
       { width: physicalSize.width, height: physicalSize.height, scaleFactor },
     );
-    logger.info('[a11y-snapshot] total=' + result.totalNodes);
+    logger.info(
+      `[a11y-snapshot] total=${result.totalNodes} extraction_len=${result.extraction.extractionText.length}`,
+    );
     return result.extraction.extractionText;
   }
 
@@ -61,38 +73,46 @@ export class NutJSElectronOperator extends NutJSOperator {
       scaleFactor,
     );
 
-    const sources = await desktopCapturer.getSources({
-      types: ['screen'],
-      thumbnailSize: {
-        width: Math.round(logicalSize.width),
-        height: Math.round(logicalSize.height),
-      },
-    });
-    const primarySource =
-      sources.find(
-        (source) => source.display_id === primaryDisplayId.toString(),
-      ) || sources[0];
+    hideWidgetForScreenshot();
+    // Small delay to ensure the widget is fully hidden before capture
+    await sleep(50);
 
-    if (!primarySource) {
-      logger.error('[screenshot] Primary display source not found', {
-        primaryDisplayId,
-        availableSources: sources.map((s) => s.display_id),
+    try {
+      const sources = await desktopCapturer.getSources({
+        types: ['screen'],
+        thumbnailSize: {
+          width: Math.round(logicalSize.width),
+          height: Math.round(logicalSize.height),
+        },
       });
-      // fallback to default screenshot
-      return await super.screenshot();
+      const primarySource =
+        sources.find(
+          (source) => source.display_id === primaryDisplayId.toString(),
+        ) || sources[0];
+
+      if (!primarySource) {
+        logger.error('[screenshot] Primary display source not found', {
+          primaryDisplayId,
+          availableSources: sources.map((s) => s.display_id),
+        });
+        // fallback to default screenshot
+        return await super.screenshot();
+      }
+
+      const screenshot = primarySource.thumbnail;
+
+      const resized = screenshot.resize({
+        width: physicalSize.width,
+        height: physicalSize.height,
+      });
+
+      return {
+        base64: resized.toJPEG(75).toString('base64'),
+        scaleFactor,
+      };
+    } finally {
+      showWidgetAfterScreenshot();
     }
-
-    const screenshot = primarySource.thumbnail;
-
-    const resized = screenshot.resize({
-      width: physicalSize.width,
-      height: physicalSize.height,
-    });
-
-    return {
-      base64: resized.toJPEG(75).toString('base64'),
-      scaleFactor,
-    };
   }
 
   async execute(params: ExecuteParams): Promise<ExecuteOutput> {
