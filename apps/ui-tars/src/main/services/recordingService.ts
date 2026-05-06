@@ -7,11 +7,17 @@ import { embedInstruction } from './memoryEmbedding';
 import {
   queryAccessibilityTree,
   getLatestTaskA11yContextSnapshot,
+  resetTaskA11yContext,
 } from './getDom';
 import { SettingStore } from '@main/store/setting';
 import { store } from '@main/store/create';
 import { getScreenSize } from '@main/utils/screen';
-import { captureFeishuWindow } from './feishuAnnotation';
+import {
+  captureFeishuWindow,
+  ensureFeishuForeground,
+} from './feishuAnnotation';
+import { hideMainWindow, showMainWindow } from '@main/window';
+import { hideWidgetWindow, showWidgetWindow } from '@main/window/ScreenMarker';
 
 // Modifier key scancodes — filter these out to avoid recording bare Ctrl/Alt/Shift/Meta keydowns
 const MODIFIER_KEYCODES = new Set<number>([
@@ -197,7 +203,7 @@ class RecordingService {
     this.pushStep({
       ...step,
       screenshotBase64: evidence.screenshotBase64,
-      a11ySnapshot: evidence.a11ySnapshot,
+      a11ySnapshot: undefined,
     });
   }
 
@@ -212,8 +218,9 @@ class RecordingService {
     this.textBuffer = '';
   }
 
-  start(instruction: string) {
+  async start(instruction: string) {
     if (this.active) return;
+    resetTaskA11yContext();
     this.active = true;
     this.isStopping = false;
     this.actionQueue = Promise.resolve();
@@ -224,6 +231,13 @@ class RecordingService {
       recordingSteps: [],
       recordingInstruction: instruction,
     });
+
+    showWidgetWindow();
+    await hideMainWindow();
+    await ensureFeishuForeground((patch) =>
+      this.setState(patch as Partial<ReturnType<typeof store.getState>>),
+    );
+    this.setState({ memoryPhases: null });
 
     // Capture start-state A11y snapshot before user begins operating
     queryAccessibilityTree({})
@@ -346,7 +360,11 @@ class RecordingService {
         isRecording: false,
         recordingSteps: [],
         recordingInstruction: null,
+        memoryPhases: null,
       });
+      hideWidgetWindow();
+      await showMainWindow();
+      resetTaskA11yContext();
       this.isStopping = false;
       return;
     }
@@ -361,6 +379,7 @@ class RecordingService {
       instruction,
       instructionEmbedding,
       operator: settings.operator,
+      source: 'manual',
       steps: recordingSteps,
       startA11ySnapshot: this.startA11ySnapshot,
       successMeta: {
@@ -381,7 +400,11 @@ class RecordingService {
       isRecording: false,
       recordingSteps: [],
       recordingInstruction: null,
+      memoryPhases: null,
     });
+    hideWidgetWindow();
+    await showMainWindow();
+    resetTaskA11yContext();
     this.isStopping = false;
   }
 
@@ -394,7 +417,11 @@ class RecordingService {
       isRecording: false,
       recordingSteps: [],
       recordingInstruction: null,
+      memoryPhases: null,
     });
+    hideWidgetWindow();
+    await showMainWindow();
+    resetTaskA11yContext();
     this.isStopping = false;
     logger.info('[RecordingService] Recording discarded');
   }

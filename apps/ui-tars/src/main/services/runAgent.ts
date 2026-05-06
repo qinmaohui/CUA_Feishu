@@ -5,7 +5,7 @@
 import assert from 'assert';
 
 import { logger } from '@main/logger';
-import { StatusEnum } from '@ui-tars/shared/types';
+import { StatusEnum, type PredictionParsed } from '@ui-tars/shared/types';
 import { type ConversationWithSoM } from '@main/shared/types';
 import { GUIAgent, type GUIAgentConfig } from '@ui-tars/sdk';
 import { markClickPosition } from '@main/utils/image';
@@ -52,6 +52,15 @@ import {
 } from './replayExecutor';
 
 const A11Y_CONTEXT_PREFIX = '[A11Y_CONTEXT]';
+const VERIFY_CONCLUSION_PREFIX = '[\u9a8c\u8bc1\u7ed3\u8bba]';
+const MEMORY_REPLAY_PREFIX = '[\u8bb0\u5fc6\u91cd\u653e]';
+
+type MessageEvidence = Partial<
+  Pick<
+    ConversationWithSoM,
+    'screenshotBase64' | 'screenshotBase64WithElementMarker' | 'a11ySnapshot'
+  >
+>;
 
 const getRecentA11yFromMessages = (
   messages: ConversationWithSoM[],
@@ -63,6 +72,23 @@ const getRecentA11yFromMessages = (
       (m) =>
         typeof m.value === 'string' && m.value.startsWith(A11Y_CONTEXT_PREFIX),
     )?.value;
+
+const createMemoryReplayMessage = (step: MemoryStep): ConversationWithSoM => ({
+  from: 'gpt',
+  value: `${MEMORY_REPLAY_PREFIX} ${step.thought || step.action_type}`,
+  timing: { start: Date.now(), end: Date.now(), cost: 0 },
+  screenshotBase64: step.screenshotBase64,
+  screenshotBase64WithElementMarker: step.screenshotWithMarker,
+  a11ySnapshot: step.a11ySnapshot,
+  predictionParsed: [
+    {
+      action_type: step.action_type,
+      action_inputs: step.action_inputs as PredictionParsed['action_inputs'],
+      thought: step.thought ?? '',
+      reflection: step.reflection ?? null,
+    },
+  ],
+});
 
 export const runAgent = async (
   setState: (state: AppState) => void,
@@ -308,13 +334,11 @@ export const runAgent = async (
   const a11yGuidance = `
 ## Accessibility Tree Context
 Before each response, a fresh [A11Y_CONTEXT] snapshot is injected listing visible, enabled UI controls.
-Each entry includes precomputed click targets:
-  - norm=(x,y)
-  - point1000=<point>NNN NNN</point>
+Each entry format: [Type] "Name" <point>X Y</point>
 
 When deciding where to click or type:
 1. If the target appears in [A11Y_CONTEXT], copy its point1000 value directly and use it in click(point='...').
-2. Do not re-calculate or re-derive coordinates from rect/norm.
+2. Do not re-calculate or re-derive coordinates from the screenshot.
 3. Only if the target is missing from [A11Y_CONTEXT], fall back to screenshot-based estimation.
 `;
 
@@ -350,11 +374,12 @@ When deciding where to click or type:
   };
 
   // Helper: push a system-level message into chat history so it appears in session records
-  const pushSystemMessage = (text: string) => {
+  const pushSystemMessage = (text: string, evidence: MessageEvidence = {}) => {
     const msg: ConversationWithSoM = {
       from: 'system',
       value: text,
       timing: { start: Date.now(), end: Date.now(), cost: 0 },
+      ...evidence,
     };
     setState({ ...getState(), messages: [...getState().messages, msg] });
   };
@@ -497,16 +522,40 @@ When deciding where to click or type:
             ),
           });
 
-          await verifyReplayResult(instructions, (status, message) => {
-            setState({
-              ...getState(),
-              verifyProgress: { status, message },
-            });
+          const replayMessages = bestMatch.memory.steps.map(
+            createMemoryReplayMessage,
+          );
+          setState({
+            ...getState(),
+            messages: [...getState().messages, ...replayMessages],
           });
+
+          const verifyResult = await verifyReplayResult(
+            instructions,
+            (status, message) => {
+              setState({
+                ...getState(),
+                verifyProgress: { status, message },
+              });
+            },
+          );
+          const verifyLabel = verifyResult.ok
+            ? '\u2713 \u4efb\u52a1\u5df2\u5b8c\u6210'
+            : '\u2717 \u4efb\u52a1\u672a\u5b8c\u6210';
+          pushSystemMessage(
+            `${VERIFY_CONCLUSION_PREFIX} ${verifyLabel}\uff1a${verifyResult.reason}`,
+            {
+              screenshotBase64: verifyResult.screenshotBase64,
+              a11ySnapshot: verifyResult.a11ySnapshot,
+            },
+          );
 
           setState({
             ...getState(),
-            status: StatusEnum.END,
+            status: verifyResult.ok ? StatusEnum.END : StatusEnum.ERROR,
+            errorMsg: verifyResult.ok
+              ? getState().errorMsg
+              : verifyResult.reason,
             thinkingMsg: '',
           });
 
@@ -682,6 +731,7 @@ When deciding where to click or type:
         instruction: instructions,
         instructionEmbedding,
         operator: settings.operator,
+        source: 'agent',
         steps,
         startA11ySnapshot,
         successMeta: {

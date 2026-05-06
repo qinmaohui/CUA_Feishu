@@ -533,7 +533,7 @@ function getNodeKey(node: AXNode): string {
   return `${node.controlType}|${node.name}|${toRect(node)}|${node.parentIndex}`;
 }
 
-/** Keep only visible, enabled, named nodes of a given type set */
+/** Keep only visible, enabled, named, non-Text nodes of a given type set */
 function pickNodes(
   nodes: AXNode[],
   types: Set<string>,
@@ -543,6 +543,7 @@ function pickNodes(
     .filter(
       (n) =>
         types.has(n.controlType) &&
+        n.controlType !== 'Text' &&
         n.name.trim() &&
         !n.isOffscreen &&
         n.isEnabled,
@@ -551,23 +552,19 @@ function pickNodes(
 }
 
 function formatNode(n: AXNode, screenSize?: ScreenSize): string {
-  let base = `[${n.controlType}] "${n.name}" rect=${toRect(n)}`;
+  const base = `[${n.controlType}] "${n.name}"`;
   if (screenSize && n.boundingRectangle) {
     const r = n.boundingRectangle;
     const nx = (r.left + r.width / 2) / screenSize.width;
     const ny = (r.top + r.height / 2) / screenSize.height;
     const x1000 = Math.max(1, Math.min(999, Math.round(nx * 1000)));
     const y1000 = Math.max(1, Math.min(999, Math.round(ny * 1000)));
-    base += ` norm=(${nx.toFixed(3)},${ny.toFixed(3)}) point1000=<point>${x1000} ${y1000}</point>`;
+    return `${base} norm=(${nx.toFixed(3)},${ny.toFixed(3)}) <point>${x1000} ${y1000}</point>`;
   }
   return base;
 }
 
-function buildExtractionText(
-  nodes: AXNode[],
-  diff: A11yTreeDiffSummary | null,
-  screenSize?: ScreenSize,
-): string {
+function buildExtractionText(nodes: AXNode[], screenSize?: ScreenSize): string {
   const visible = nodes.filter((n) => !n.isOffscreen && n.isEnabled);
   const typeMap = new Map<string, number>();
   for (const n of visible)
@@ -577,12 +574,12 @@ function buildExtractionText(
     .map(([t, c]) => `${t}:${c}`)
     .join(' ');
 
-  const clickable = pickNodes(nodes, CLICKABLE_TYPES, 40);
-  const inputs = pickNodes(nodes, INPUT_TYPES, 20);
-  const selectable = pickNodes(nodes, SELECTABLE_TYPES, 20);
+  const clickable = pickNodes(nodes, CLICKABLE_TYPES, 80);
+  const inputs = pickNodes(nodes, INPUT_TYPES, 40);
+  const selectable = pickNodes(nodes, SELECTABLE_TYPES, 40);
 
   const header = screenSize
-    ? `[A11Y_CONTEXT] total=${nodes.length} visible_enabled=${visible.length} types=${typeStats} screen=${Math.round(screenSize.width)}x${Math.round(screenSize.height)} scale=${screenSize.scaleFactor} sample_norm_check=use_norm_directly`
+    ? `[A11Y_CONTEXT] total=${nodes.length} visible_enabled=${visible.length} types=${typeStats} screen=${Math.round(screenSize.width)}x${Math.round(screenSize.height)} scale=${screenSize.scaleFactor}`
     : `[A11Y_CONTEXT] total=${nodes.length} visible_enabled=${visible.length} types=${typeStats}`;
 
   const lines: string[] = [header];
@@ -600,19 +597,6 @@ function buildExtractionText(
   if (selectable.length) {
     lines.push('## 可选择元素');
     selectable.forEach((n) => lines.push('  ' + formatNode(n, screenSize)));
-  }
-
-  if (diff) {
-    const hasChanges =
-      diff.addedCount + diff.removedCount + diff.changedCount > 0;
-    if (hasChanges) {
-      lines.push(
-        `## 变化 (+${diff.addedCount} -${diff.removedCount} ~${diff.changedCount})`,
-      );
-      diff.addedTop.slice(0, 15).forEach((r) => lines.push(`  + ${r}`));
-      diff.removedTop.slice(0, 15).forEach((r) => lines.push(`  - ${r}`));
-      diff.changedTop.slice(0, 15).forEach((r) => lines.push(`  ~ ${r}`));
-    }
   }
 
   return lines.join('\n');
@@ -710,7 +694,7 @@ function extractA11yContext(
   const diff = taskA11yContext
     ? summarizeDiff(taskA11yContext.lastNodes, allNodes)
     : null;
-  const extractionText = buildExtractionText(allNodes, diff, screenSize);
+  const extractionText = buildExtractionText(allNodes, screenSize);
 
   taskA11yContext = {
     generation: ++contextGeneration,
@@ -752,6 +736,19 @@ export async function queryAccessibilityTree(
 
   const extraction = extractA11yContext(tree.nodes, screenSize);
 
+  const filteredNoText = filtered.filter(
+    (n) => n.name.trim() && n.controlType !== 'Text',
+  );
+  logFullA11yTree(
+    tree.nodes,
+    filteredNoText.slice(0, limit),
+    extraction.extractionText,
+    {
+      processName: tree.processName,
+      windowTitle: tree.windowTitle,
+    },
+  );
+
   return {
     snapshotTimestamp: timestamp,
     processName: tree.processName,
@@ -770,19 +767,9 @@ export function formatA11yQueryObservation(
   const lines: string[] = [
     `A11Y_QUERY_RESULT matched=${result.matchedCount}/${result.totalNodes}`,
     `window="${result.windowTitle}" ts=${result.snapshotTimestamp}`,
+    '',
+    result.extraction.extractionText,
   ];
-
-  for (const n of result.nodes) {
-    const rect = n.boundingRectangle
-      ? `${n.boundingRectangle.left},${n.boundingRectangle.top},${n.boundingRectangle.width}x${n.boundingRectangle.height}`
-      : 'no-rect';
-    lines.push(
-      `- [${n.controlType}] name="${n.name}" enabled=${n.isEnabled} offscreen=${n.isOffscreen} rect=${rect}`,
-    );
-  }
-
-  lines.push('');
-  lines.push(result.extraction.extractionText);
 
   return lines.join('\n');
 }
@@ -893,6 +880,104 @@ export async function logA11yQuery(entry: A11yQueryLogEntry): Promise<void> {
     await appendFile(logPath, JSON.stringify(entry) + '\n', 'utf-8');
   } catch (e) {
     logger.error('[a11y-log] Failed to write log file:', e);
+  }
+}
+
+function formatNodeLine(n: AXNode): string {
+  const r = n.boundingRectangle;
+  const rect = r
+    ? `[${r.left},${r.top} ${r.width}x${r.height}]`
+    : '[no-rect       ]';
+  const state = `${n.isEnabled ? 'E' : 'e'}${n.isOffscreen ? 'O' : 'o'}`;
+  const idx = String(n.index).padStart(5);
+  const pidx = String(n.parentIndex).padStart(5);
+  const type = (n.controlType || 'Unknown').padEnd(12);
+  const name =
+    n.name.length > 40 ? n.name.slice(0, 37) + '...' : n.name.padEnd(40);
+  return `  ${idx} │ ${pidx} │ ${type} │ ${state} │ ${rect.padEnd(24)} │ ${name}`;
+}
+
+function formatTreeSection(nodes: AXNode[], title: string): string {
+  const header = `  ${'INDEX'.padStart(5)} │ ${'PARENT'.padStart(5)} │ ${'TYPE'.padEnd(12)} │ ST │ ${'RECTANGLE'.padEnd(24)} │ NAME`;
+  const sep = `  ${'─'.repeat(5)}─┼─${'─'.repeat(5)}─┼─${'─'.repeat(12)}─┼────┼─${'─'.repeat(24)}─┼─${'─'.repeat(40)}`;
+  const lines = nodes.map(formatNodeLine);
+  return [
+    '',
+    `┌${'─'.repeat(title.length + 2)}┐`,
+    `│ ${title} │`,
+    `└${'─'.repeat(title.length + 2)}┘`,
+    `  Total: ${nodes.length}`,
+    '',
+    header,
+    sep,
+    ...lines,
+  ].join('\n');
+}
+
+export async function logFullA11yTree(
+  allNodes: AXNode[],
+  filteredNodes: AXNode[],
+  extractionText: string,
+  meta: { processName: string; windowTitle: string },
+): Promise<void> {
+  const now = new Date().toISOString();
+  const namedNodes = allNodes.filter(
+    (n) => n.name.trim() && n.controlType !== 'Text',
+  );
+
+  // ── console log (formatted, human-readable) ──
+  const consoleOutput = [
+    '',
+    `╔${'═'.repeat(78)}╗`,
+    `║  A11Y TREE LOG  ${now.padEnd(59)}║`,
+    `╠${'═'.repeat(78)}╣`,
+    `║  Process    : ${meta.processName.padEnd(61)}║`,
+    `║  Window     : ${meta.windowTitle.slice(0, 61).padEnd(61)}║`,
+    `║  All nodes  : ${String(allNodes.length).padEnd(61)}║`,
+    `║  Named nodes: ${String(namedNodes.length).padEnd(61)}║`,
+    `║  Filtered   : ${String(filteredNodes.length).padEnd(61)}║`,
+    `╚${'═'.repeat(78)}╝`,
+    formatTreeSection(
+      namedNodes,
+      `NAMED NODES (name non-empty, ${namedNodes.length}/${allNodes.length})`,
+    ),
+    '',
+    `ST Legend: E=Enabled e=Disabled  O=Offscreen o=Onscreen`,
+    '',
+    formatTreeSection(
+      filteredNodes,
+      `FILTERED RESULT (${filteredNodes.length} nodes)`,
+    ),
+    '',
+    `┌────────────────────────────────────────────┐`,
+    `│ EXTRACTION TEXT (injected into VLM prompt) │`,
+    `└────────────────────────────────────────────┘`,
+    ...extractionText.split('\n').map((l) => `  ${l}`),
+    '',
+    `╚${'═'.repeat(78)}╝`,
+  ].join('\n');
+
+  logger.info(`[a11y-tree] ===== TREE LOG =====\n${consoleOutput}`);
+
+  // ── JSONL file (structured, for programmatic analysis) ──
+  try {
+    const logDir = join(app.getAppPath(), '..', '..', 'logs');
+    await mkdir(logDir, { recursive: true });
+    const logPath = join(logDir, 'a11y-full-tree-log.jsonl');
+    const record = {
+      timestamp: now,
+      processName: meta.processName,
+      windowTitle: meta.windowTitle,
+      allNodesCount: allNodes.length,
+      namedNodesCount: namedNodes.length,
+      filteredNodesCount: filteredNodes.length,
+      namedNodes,
+      filteredNodes_detail: filteredNodes,
+      extractionText,
+    };
+    await appendFile(logPath, JSON.stringify(record) + '\n', 'utf-8');
+  } catch (e) {
+    logger.error('[a11y-tree] Failed to write tree log file:', e);
   }
 }
 

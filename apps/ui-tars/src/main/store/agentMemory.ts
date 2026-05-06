@@ -19,6 +19,7 @@ export interface AgentMemoryItem {
   instruction: string;
   instructionEmbedding: number[];
   operator: Operator;
+  source?: 'agent' | 'manual';
   steps: MemoryStep[];
   startA11ySnapshot?: string;
   successMeta: {
@@ -67,7 +68,8 @@ export class AgentMemoryStore {
     const dedupIdx = existing.findIndex(
       (memory) =>
         memory.operator === item.operator &&
-        memory.instruction === item.instruction,
+        memory.instruction === item.instruction &&
+        (memory.source ?? 'agent') === (item.source ?? 'agent'),
     );
 
     if (dedupIdx >= 0) {
@@ -80,7 +82,9 @@ export class AgentMemoryStore {
           item.instructionEmbedding.length > 0
             ? item.instructionEmbedding
             : current.instructionEmbedding,
+        source: item.source ?? current.source,
         steps: item.steps.length > 0 ? item.steps : current.steps,
+        startA11ySnapshot: item.startA11ySnapshot ?? current.startA11ySnapshot,
         successMeta: {
           ...current.successMeta,
           updatedAt: now,

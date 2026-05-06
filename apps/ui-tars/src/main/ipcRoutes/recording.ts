@@ -12,7 +12,7 @@ export const recordingRoute = t.router({
   startRecording: t.procedure
     .input<{ instruction: string }>()
     .handle(async ({ input }) => {
-      recordingService.start(input.instruction);
+      await recordingService.start(input.instruction);
     }),
 
   saveRecording: t.procedure.handle(async () => {
@@ -20,7 +20,7 @@ export const recordingRoute = t.router({
   }),
 
   discardRecording: t.procedure.handle(async () => {
-    recordingService.discard();
+    await recordingService.discard();
   }),
 
   replayMemory: t.procedure
