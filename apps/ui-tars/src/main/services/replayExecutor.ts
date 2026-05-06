@@ -8,6 +8,7 @@ import type {
   Operator as BaseOperator,
   ExecuteOutput,
 } from '@ui-tars/sdk/core';
+import { sleep } from '@ui-tars/shared/utils';
 import { queryAccessibilityTree } from './getDom';
 import { captureFeishuWindow } from './feishuAnnotation';
 import { SettingStore } from '@main/store/setting';
@@ -433,6 +434,7 @@ export const replayByMemory = async ({
     const parsedPrediction = toPrediction(step);
 
     try {
+      const stepStart = Date.now();
       const executeOutput = await operator.execute({
         prediction: JSON.stringify(step),
         parsedPrediction,
@@ -441,6 +443,12 @@ export const replayByMemory = async ({
         scaleFactor,
         factors: [1, 1],
       });
+
+      // Ensure at least 1s between steps so the UI can catch up
+      const elapsed = Date.now() - stepStart;
+      if (elapsed < 1000) {
+        await sleep(1000 - elapsed);
+      }
 
       if (isExecuteFailed(executeOutput)) {
         return {

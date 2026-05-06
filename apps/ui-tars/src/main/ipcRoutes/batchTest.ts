@@ -11,6 +11,7 @@ import {
 import { logger } from '@main/logger';
 import { getGlobalStopEpoch, hasGlobalStopSince } from '@main/services/runStop';
 import type { ConversationWithSoM } from '@main/shared/types';
+import { verifyReplayResult } from '@main/services/replayExecutor';
 
 const t = initIpc.create();
 const A11Y_CONTEXT_PREFIX = '[A11Y_CONTEXT]';
@@ -99,6 +100,41 @@ export const batchTestRoute = t.router({
           thinking: false,
           thinkingMsg: null,
         });
+
+        // If runAgent didn't produce a verify conclusion (non-replay path), run verify now
+        const stateAfterRun = store.getState();
+        const hasVerifyMsg = stateAfterRun.messages.some(
+          (m) => m.from === 'system' && m.value?.includes('[验证结论]'),
+        );
+        if (!hasVerifyMsg && stateAfterRun.status === StatusEnum.END) {
+          try {
+            const verifyResult = await verifyReplayResult(
+              testCase.instruction,
+              (status, message) => {
+                store.setState({
+                  ...store.getState(),
+                  verifyProgress: { status, message },
+                });
+              },
+            );
+            const verifyLabel = verifyResult.ok
+              ? '✓ 任务已完成'
+              : '✗ 任务未完成';
+            const verifyMsg = {
+              from: 'system' as const,
+              value: `[验证结论] ${verifyLabel}：${verifyResult.reason}`,
+              timing: { start: Date.now(), end: Date.now(), cost: 0 },
+              screenshotBase64: verifyResult.screenshotBase64,
+              a11ySnapshot: verifyResult.a11ySnapshot,
+            };
+            store.setState({
+              ...store.getState(),
+              messages: [...store.getState().messages, verifyMsg],
+            });
+          } catch (e) {
+            logger.warn('[BatchTest] verifyReplayResult failed:', e);
+          }
+        }
 
         const finalState = store.getState();
         const caseEndTime = Date.now();
