@@ -2,6 +2,7 @@
  * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
  * SPDX-License-Identifier: Apache-2.0
  */
+import { useEffect, useState } from 'react';
 import { useStore } from '@renderer/hooks/useStore';
 import {
   Monitor,
@@ -23,7 +24,6 @@ import type {
 import type { MemoryStep } from '@main/store/agentMemory';
 
 import logo from '@resources/logo-full.png?url';
-import { useEffect, useState } from 'react';
 
 import './widget.css';
 
@@ -44,10 +44,9 @@ interface Action {
 
 const getOperatorIcon = (type: string) => {
   switch (type) {
-    case 'nutjs':
-      return <Monitor className="h-3 w-3 mr-1.5" />;
     case 'browser':
       return <Globe className="h-3 w-3 mr-1.5" />;
+    case 'nutjs':
     default:
       return <Monitor className="h-3 w-3 mr-1.5" />;
   }
@@ -55,10 +54,9 @@ const getOperatorIcon = (type: string) => {
 
 const getOperatorLabel = (type: string) => {
   switch (type) {
-    case 'nutjs':
-      return 'Computer';
     case 'browser':
       return 'Browser';
+    case 'nutjs':
     default:
       return 'Computer';
   }
@@ -80,7 +78,7 @@ const PHASE_TEXT: Record<MemoryPhaseStatus, string> = {
 
 const MemoryPhasesBlock = ({ phases }: { phases: MemoryPhase[] }) => (
   <div className="mt-3 mb-2 rounded-lg border border-gray-200 bg-gray-50/80 px-3 py-2">
-    <div className="text-xs font-semibold text-gray-500 mb-1.5">记忆检索</div>
+    <div className="mb-1.5 text-xs font-semibold text-gray-500">记忆检索</div>
     <div className="flex flex-col gap-1">
       {phases.map((phase) => (
         <div key={phase.id} className="flex flex-col gap-0.5">
@@ -89,7 +87,7 @@ const MemoryPhasesBlock = ({ phases }: { phases: MemoryPhase[] }) => (
             <span className={PHASE_TEXT[phase.status]}>{phase.label}</span>
           </div>
           {phase.detail && (
-            <div className="ml-5 text-xs text-gray-400 truncate">
+            <div className="ml-5 truncate text-xs text-gray-400">
               {phase.detail}
             </div>
           )}
@@ -99,18 +97,74 @@ const MemoryPhasesBlock = ({ phases }: { phases: MemoryPhase[] }) => (
   </div>
 );
 
-const RecordingBlock = ({ stepCount }: { stepCount: number }) => (
-  <div className="mt-3 mb-2 rounded-lg border border-red-200 bg-red-50/80 px-3 py-2">
-    <div className="flex items-center justify-between mb-1">
-      <span className="flex items-center gap-1.5 text-xs font-semibold text-red-600">
-        <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-        正在录制
-      </span>
-      <span className="text-xs text-red-500">{stepCount} 步</span>
+const formatRecordingStep = (step: MemoryStep) => {
+  const inputs = step.action_inputs ?? {};
+
+  switch (step.action_type) {
+    case 'type':
+    case 'input':
+      return inputs.content ? `输入 ${String(inputs.content)}` : '输入文本';
+    case 'hotkey':
+    case 'key':
+      return inputs.key ? `快捷键 ${String(inputs.key)}` : '快捷键';
+    case 'scroll':
+      return inputs.direction ? `滚动 ${String(inputs.direction)}` : '滚动';
+    case 'click':
+    case 'double_click':
+    case 'right_click':
+    case 'middle_click':
+      return inputs.start_box
+        ? `坐标 ${String(inputs.start_box)}`
+        : step.action_type;
+    default:
+      return step.action_type;
+  }
+};
+
+const RecordingBlock = ({
+  instruction,
+  steps,
+}: {
+  instruction: string | null;
+  steps: MemoryStep[];
+}) => {
+  const latestSteps = steps.slice(-3).reverse();
+
+  return (
+    <div className="mt-3 mb-2 rounded-lg border border-red-200 bg-red-50/80 px-3 py-2">
+      <div className="mb-1 flex items-center justify-between">
+        <span className="flex items-center gap-1.5 text-xs font-semibold text-red-600">
+          <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+          正在录制
+        </span>
+        <span className="text-xs text-red-500">{steps.length} 步</span>
+      </div>
+      {!!instruction && (
+        <div className="mb-2 max-h-10 overflow-hidden break-words text-xs leading-relaxed text-gray-600">
+          {instruction}
+        </div>
+      )}
+      {!!latestSteps.length && (
+        <div className="mb-2 rounded-md bg-white/70 px-2 py-1.5">
+          <div className="mb-1 text-[11px] font-medium text-gray-500">
+            当前录入步骤
+          </div>
+          <div className="flex flex-col gap-1">
+            {latestSteps.map((step, index) => (
+              <div
+                key={`${step.action_type}-${steps.length - index}`}
+                className="truncate text-xs text-gray-600"
+              >
+                {steps.length - index}. {formatRecordingStep(step)}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="text-xs text-gray-400">Ctrl+S 保存 · Ctrl+D 中断</div>
     </div>
-    <div className="text-xs text-gray-400">Ctrl+S 保存 · Ctrl+D 中断</div>
-  </div>
-);
+  );
+};
 
 const ReplayProgressBlock = ({
   progress,
@@ -118,28 +172,25 @@ const ReplayProgressBlock = ({
   progress: { current: number; total: number; currentStep: MemoryStep | null };
 }) => (
   <div className="mt-2 mb-2 rounded-lg border border-blue-200 bg-blue-50/80 px-3 py-2">
-    <div className="flex items-center justify-between mb-1">
+    <div className="mb-1 flex items-center justify-between">
       <span className="text-xs font-semibold text-blue-600">正在重放操作</span>
       <span className="text-xs text-blue-500">
         {progress.current}/{progress.total}
       </span>
     </div>
-    <div className="w-full h-1 bg-blue-100 rounded-full mb-1.5">
+    <div className="mb-1.5 h-1 w-full rounded-full bg-blue-100">
       <div
-        className="h-1 bg-blue-400 rounded-full transition-all duration-300"
+        className="h-1 rounded-full bg-blue-400 transition-all duration-300"
         style={{ width: `${(progress.current / progress.total) * 100}%` }}
       />
     </div>
     {progress.currentStep && (
-      <div className="text-xs text-gray-600 truncate">
+      <div className="truncate text-xs text-gray-600">
         <span className="font-medium text-gray-700">
           {progress.currentStep.action_type}
         </span>
         {progress.currentStep.thought && (
-          <span className="text-gray-500">
-            {' '}
-            — {progress.currentStep.thought}
-          </span>
+          <span className="text-gray-500"> {progress.currentStep.thought}</span>
         )}
       </div>
     )}
@@ -169,9 +220,9 @@ const VerifyBlock = ({ verify }: { verify: VerifyProgress }) => {
     <div
       className={`mt-2 mb-2 rounded-lg border ${borderColor} ${bgColor} px-3 py-2`}
     >
-      <div className="flex items-center gap-1.5 mb-1">
+      <div className="mb-1 flex items-center gap-1.5">
         {isThinking ? (
-          <Loader2 className="h-3 w-3 text-amber-500 animate-spin" />
+          <Loader2 className="h-3 w-3 animate-spin text-amber-500" />
         ) : isDone ? (
           <CheckCircle2 className="h-3 w-3 text-emerald-500" />
         ) : (
@@ -181,7 +232,7 @@ const VerifyBlock = ({ verify }: { verify: VerifyProgress }) => {
           {isThinking ? '验证中...' : isDone ? '验证通过' : '验证未通过'}
         </span>
       </div>
-      <div className="text-xs text-gray-500 leading-relaxed">
+      <div className="text-xs leading-relaxed text-gray-500">
         {verify.message}
       </div>
     </div>
@@ -197,18 +248,16 @@ const Widget = () => {
     replayProgress,
     isRecording,
     recordingSteps,
+    recordingInstruction,
     verifyProgress,
   } = useStore();
   const { settings } = useSetting();
 
   const currentOperator = settings.operator || 'nutjs';
-
   const [actions, setActions] = useState<Action[]>([]);
 
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
-
-    console.log('lastMessage', lastMessage);
 
     if (!lastMessage) {
       return;
@@ -223,13 +272,11 @@ const Widget = () => {
             query: lastMessage.value,
           },
         ]);
-        return;
-      } else {
-        return;
       }
+      return;
     }
 
-    const ac =
+    const nextActions =
       lastMessage.predictionParsed?.map((item) => {
         const input = [
           item.action_inputs?.start_box &&
@@ -250,7 +297,7 @@ const Widget = () => {
         };
       }) || [];
 
-    setActions(ac);
+    setActions(nextActions);
   }, [messages]);
 
   const toDisplayShortcut = (shortcut?: string) => {
@@ -261,7 +308,7 @@ const Widget = () => {
       .map((part) => {
         const key = part.trim();
         if (key === 'CommandOrControl') {
-          return isWin ? 'Ctrl' : '⌘';
+          return isWin ? 'Ctrl' : 'Cmd';
         }
         if (key === 'Control') {
           return 'Ctrl';
@@ -275,9 +322,10 @@ const Widget = () => {
   };
 
   const pauseShortcut =
-    toDisplayShortcut(settings.pauseShortcut) || (isWin ? 'Ctrl+P' : '⌘+P');
+    toDisplayShortcut(settings.pauseShortcut) || (isWin ? 'Ctrl+P' : 'Cmd+P');
   const stopShortcut =
-    toDisplayShortcut(settings.stopShortcut) || (isWin ? 'Ctrl+Esc' : '⌘+Esc');
+    toDisplayShortcut(settings.stopShortcut) ||
+    (isWin ? 'Ctrl+Esc' : 'Cmd+Esc');
 
   const statusMeta = (() => {
     switch (status) {
@@ -303,14 +351,12 @@ const Widget = () => {
 
   return (
     <div
-      className="w-100 h-100 overflow-hidden p-4 bg-white/90 dark:bg-gray-800/90 rounded-[10px] border-gray-300"
+      className="h-100 w-100 overflow-hidden rounded-[10px] border-gray-300 bg-white/90 p-4 dark:bg-gray-800/90"
       style={{ borderWidth: isWin ? '1px' : '0' }}
     >
-      <div className="flex draggable-area">
-        {/* Logo */}
-        <img src={logo} alt="logo" className="-ml-2 h-6 mr-auto" />
-        {/* Mode Badge */}
-        <div className="flex justify-center items-center text-xs border px-2 rounded-full text-gray-500">
+      <div className="draggable-area flex">
+        <img src={logo} alt="logo" className="-ml-2 mr-auto h-6" />
+        <div className="flex items-center justify-center rounded-full border px-2 text-xs text-gray-500">
           {getOperatorIcon(currentOperator)}
           {getOperatorLabel(currentOperator)}
         </div>
@@ -326,7 +372,10 @@ const Widget = () => {
       {!!errorMsg && <div>{errorMsg}</div>}
 
       {!!isRecording && (
-        <RecordingBlock stepCount={recordingSteps?.length ?? 0} />
+        <RecordingBlock
+          instruction={recordingInstruction}
+          steps={recordingSteps ?? []}
+        />
       )}
       {!!memoryPhases && <MemoryPhasesBlock phases={memoryPhases} />}
       {!!replayProgress && <ReplayProgressBlock progress={replayProgress} />}
@@ -338,54 +387,47 @@ const Widget = () => {
             const ActionIcon = ActionIconMap[action.type] || MousePointerClick;
             return (
               <div key={idx}>
-                {/* Actions */}
                 {!!action.type && (
                   <>
                     <div className="flex items-baseline">
                       <div className="text-lg font-medium">{action.action}</div>
-                      {/* {action.cost && (
-                        <span className="text-xs text-gray-500 ml-2">{`(${ms(action.cost)})`}</span>
-                      )} */}
                     </div>
-                    <div className="flex items-center text-gray-500 text-sm">
+                    <div className="flex items-center text-sm text-gray-500">
                       {!!ActionIcon && (
                         <ActionIcon
-                          className="w-4 h-4 mr-1.5"
+                          className="mr-1.5 h-4 w-4"
                           strokeWidth={2}
                         />
                       )}
                       <span className="text-gray-600">{action.type}</span>
                       {action.input && (
-                        <span className="text-gray-600 break-all truncate">
+                        <span className="truncate break-all text-gray-600">
                           {action.input}
                         </span>
                       )}
                     </div>
                   </>
                 )}
-                {/* Reflection */}
                 {!!action.reflection && (
                   <>
-                    <div className="text-lg font-medium mt-2">Reflection</div>
-                    <div className="text-gray-500 text-sm break-all">
+                    <div className="mt-2 text-lg font-medium">Reflection</div>
+                    <div className="break-all text-sm text-gray-500">
                       {action.reflection}
                     </div>
                   </>
                 )}
-                {/* Thought */}
                 {!!action.thought && (
                   <>
-                    <div className="text-lg font-medium mt-2">Thought</div>
-                    <div className="text-gray-500 text-sm break-all mb-4">
+                    <div className="mt-2 text-lg font-medium">Thought</div>
+                    <div className="mb-4 break-all text-sm text-gray-500">
                       {action.thought}
                     </div>
                   </>
                 )}
-                {/* Human Query */}
                 {!!action.query && (
                   <>
                     <div className="text-lg font-medium">Human Query</div>
-                    <div className="text-gray-500 text-sm break-all">
+                    <div className="break-all text-sm text-gray-500">
                       {action.query}
                     </div>
                   </>
@@ -395,7 +437,7 @@ const Widget = () => {
           })}
         </div>
       )}
-      <div className="absolute bottom-4 right-4 shortcut-panel">
+      <div className="shortcut-panel absolute right-4 bottom-4">
         <div className="shortcut-row">
           <span className="shortcut-label">Pause</span>
           <span className="shortcut-key">{pauseShortcut}</span>

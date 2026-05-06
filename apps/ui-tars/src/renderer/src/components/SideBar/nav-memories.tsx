@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   MoreHorizontal,
   Trash2,
@@ -10,6 +10,8 @@ import {
   RefreshCw,
   XCircle,
 } from 'lucide-react';
+import mediumZoom, { type Zoom } from 'medium-zoom';
+import { useResize } from '@renderer/hooks/useResize';
 
 import {
   DropdownMenu,
@@ -124,6 +126,14 @@ export function NavMemories({
   const [selectedStep, setSelectedStep] = useState(0);
   const { isRecording } = useStore();
   const { setOpen, state } = useSidebar();
+  const { size, getResizeHandleProps } = useResize({
+    initialWidth: 1440,
+    initialHeight: 860,
+    minWidth: 760,
+    minHeight: 400,
+  });
+  const detailImgRef = useRef<HTMLImageElement>(null);
+  const zoomRef = useRef<Zoom | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -172,6 +182,23 @@ export function NavMemories({
   const detailStepImage = detailStep
     ? toDataUrl(detailStep.screenshotWithMarker ?? detailStep.screenshotBase64)
     : null;
+  const isManualMemory = detailMemory?.source === 'manual';
+  const showA11ySnapshot = !!detailStep?.a11ySnapshot && !isManualMemory;
+
+  useEffect(() => {
+    if (!detailImgRef.current || !detailStepImage) return;
+    zoomRef.current?.detach();
+    zoomRef.current?.close();
+    const zoom = mediumZoom(detailImgRef.current, {
+      background: 'rgba(0,0,0,.7)',
+      margin: 50,
+    });
+    zoomRef.current = zoom;
+    return () => {
+      zoom.detach();
+      zoom.close();
+    };
+  }, [detailStepImage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <>
@@ -291,7 +318,14 @@ export function NavMemories({
         open={!!detailMemory}
         onOpenChange={(open) => !open && setDetailMemory(null)}
       >
-        <DialogContent className="p-0 w-[min(1280px,96vw)] max-w-[96vw] h-[min(860px,90vh)] overflow-hidden gap-0">
+        <DialogContent
+          className="p-0 overflow-hidden gap-0 max-w-[96vw] flex flex-col"
+          style={{
+            width: `min(${size.width}px, 96vw)`,
+            maxWidth: '96vw',
+            height: `min(${size.height}px, 90vh)`,
+          }}
+        >
           {detailMemory && (
             <>
               <div className="flex h-full flex-col bg-white">
@@ -360,22 +394,25 @@ export function NavMemories({
                             <p className="text-xs font-medium text-neutral-500 mb-2">
                               截图
                             </p>
-                            <img
-                              src={detailStepImage}
-                              alt={`${detailMemory.name}-step-${selectedStep + 1}`}
-                              className="w-full rounded-lg border object-contain max-h-[360px] bg-white"
-                            />
+                            <div className="max-h-[min(520px,calc(90vh-280px))] overflow-auto rounded-lg border bg-white">
+                              <img
+                                ref={detailImgRef}
+                                src={detailStepImage}
+                                alt={`${detailMemory.name}-step-${selectedStep + 1}`}
+                                className="block w-full min-w-[720px] cursor-zoom-in object-contain"
+                              />
+                            </div>
                           </div>
                         )}
 
-                        <div className="bg-neutral-50 rounded-lg p-3">
+                        <div className="bg-neutral-50 rounded-lg p-3 max-h-48 overflow-auto">
                           <p className="text-xs font-medium text-neutral-500 mb-1">
                             操作
                           </p>
                           <span className="inline-block bg-blue-100 text-blue-700 text-xs font-medium px-2 py-0.5 rounded mr-2">
                             {detailStep.action_type}
                           </span>
-                          <span className="text-xs text-neutral-600">
+                          <span className="text-xs text-neutral-600 break-words">
                             {formatActionInputs(
                               detailStep.action_type,
                               detailStep.action_inputs as Record<
@@ -408,7 +445,7 @@ export function NavMemories({
                           </div>
                         )}
 
-                        {detailStep.a11ySnapshot && (
+                        {showA11ySnapshot && (
                           <div>
                             <p className="text-xs font-medium text-neutral-500 mb-1">
                               无障碍树（当时提供给 VLM 的 A11Y_CONTEXT）
@@ -425,6 +462,13 @@ export function NavMemories({
               </div>
             </>
           )}
+          {/* Width resize handle on the right edge. */}
+          <div
+            {...getResizeHandleProps('e')}
+            className="group/resize absolute inset-y-0 right-0 w-3 cursor-ew-resize"
+          >
+            <div className="absolute right-0 top-1/2 h-16 w-1 -translate-y-1/2 rounded-l bg-neutral-200 opacity-0 transition-opacity group-hover/resize:opacity-100" />
+          </div>
         </DialogContent>
       </Dialog>
 

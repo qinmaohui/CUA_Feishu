@@ -4,25 +4,16 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  useSidebar,
 } from '@renderer/components/ui/sidebar';
 
 export function NavBatchTest({ onClick }: { onClick: () => void }) {
-  const { state } = useSidebar();
-
   return (
     <SidebarGroup>
       <SidebarMenu className="items-center">
-        <SidebarMenuItem className="w-full">
-          <SidebarMenuButton
-            className="font-medium !pr-2"
-            tooltip="Batch Test"
-            onClick={onClick}
-          >
+        <SidebarMenuItem className="w-full flex flex-col items-center">
+          <SidebarMenuButton className="font-medium" onClick={onClick}>
             <FlaskConical strokeWidth={2} />
-            <span className={state === 'collapsed' ? 'sr-only' : undefined}>
-              Batch Test
-            </span>
+            <span>Batch Test</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
       </SidebarMenu>
