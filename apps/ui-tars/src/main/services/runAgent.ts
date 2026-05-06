@@ -748,6 +748,34 @@ When deciding where to click or type:
     }
   }
 
+  // Verify task completion before restoring the main window, so the screenshot
+  // captures Feishu while it is still visible. Skip if the replay path already
+  // pushed a verify conclusion message.
+  if (finalState.status === StatusEnum.END) {
+    const hasVerify = getState().messages.some(
+      (m) =>
+        m.from === 'system' &&
+        typeof m.value === 'string' &&
+        m.value.includes(VERIFY_CONCLUSION_PREFIX),
+    );
+    if (!hasVerify) {
+      const verifyResult = await verifyReplayResult(
+        instructions,
+        (status, message) => {
+          setState({ ...getState(), verifyProgress: { status, message } });
+        },
+      );
+      const verifyLabel = verifyResult.ok ? '✓ 任务已完成' : '✗ 任务未完成';
+      pushSystemMessage(
+        `${VERIFY_CONCLUSION_PREFIX} ${verifyLabel}：${verifyResult.reason}`,
+        {
+          screenshotBase64: verifyResult.screenshotBase64,
+          a11ySnapshot: verifyResult.a11ySnapshot,
+        },
+      );
+    }
+  }
+
   afterAgentRun(settings.operator);
   resetTaskA11yContext();
   setState({ ...getState(), verifyProgress: null });
