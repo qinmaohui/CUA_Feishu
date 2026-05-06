@@ -53,6 +53,12 @@ const formatDate = (ts: number) =>
     day: '2-digit',
   });
 
+const formatDuration = (ms?: number): string => {
+  if (typeof ms !== 'number' || !Number.isFinite(ms)) return '-';
+  if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
+  return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`;
+};
+
 const formatActionInputs = (
   actionType: string,
   inputs: Record<string, unknown>,
@@ -383,6 +389,10 @@ export function NavMemories({
                               step.action_inputs as Record<string, unknown>,
                             ) || '—'}
                           </span>
+                          <span className="text-[11px] text-neutral-400 mt-1 block">
+                            {formatDuration(step.timing?.cost)} / wait{' '}
+                            {formatDuration(step.delayAfterMs)}
+                          </span>
                         </button>
                       ))}
                     </div>
@@ -421,6 +431,37 @@ export function NavMemories({
                               >,
                             ) || '—'}
                           </span>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="rounded-lg border bg-white px-3 py-2">
+                            <p className="text-[11px] text-neutral-400">
+                              开始时间
+                            </p>
+                            <p className="mt-1 text-xs font-medium text-neutral-700">
+                              {detailStep.timing?.start
+                                ? new Date(
+                                    detailStep.timing.start,
+                                  ).toLocaleTimeString('zh-CN')
+                                : '-'}
+                            </p>
+                          </div>
+                          <div className="rounded-lg border bg-white px-3 py-2">
+                            <p className="text-[11px] text-neutral-400">
+                              操作耗时
+                            </p>
+                            <p className="mt-1 text-xs font-medium text-neutral-700">
+                              {formatDuration(detailStep.timing?.cost)}
+                            </p>
+                          </div>
+                          <div className="rounded-lg border bg-white px-3 py-2">
+                            <p className="text-[11px] text-neutral-400">
+                              下一步等待
+                            </p>
+                            <p className="mt-1 text-xs font-medium text-neutral-700">
+                              {formatDuration(detailStep.delayAfterMs)}
+                            </p>
+                          </div>
                         </div>
 
                         {detailStep.thought && (

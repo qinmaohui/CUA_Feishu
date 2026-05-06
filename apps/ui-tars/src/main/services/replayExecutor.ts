@@ -20,6 +20,13 @@ type ReplayResult = {
   reason?: string;
 };
 
+const MIN_REPLAY_DELAY_MS = 1000;
+const MAX_REPLAY_DELAY_MS = 8000;
+const UI_STABLE_POLL_MS = 400;
+const UI_STABLE_REQUIRED_COUNT = 2;
+const UI_STABLE_SAMPLE_SIZE = 2000;
+const UI_STABLE_EXTRA_TIMEOUT_MS = 3000;
+
 const toPrediction = (step: MemoryStep): PredictionParsed => ({
   action_type: step.action_type,
   action_inputs: step.action_inputs as PredictionParsed['action_inputs'],
@@ -49,6 +56,71 @@ const isExecuteFailed = (output: ExecuteOutput | void) => {
     return false;
   }
   return output.status === StatusEnum.ERROR;
+};
+
+const clampDelay = (delayMs?: number) => {
+  if (typeof delayMs !== 'number' || !Number.isFinite(delayMs)) {
+    return MIN_REPLAY_DELAY_MS;
+  }
+  return Math.min(Math.max(delayMs, MIN_REPLAY_DELAY_MS), MAX_REPLAY_DELAY_MS);
+};
+
+const fingerprintScreenshot = (base64: string) => {
+  const sampleSize = Math.min(UI_STABLE_SAMPLE_SIZE, base64.length);
+  if (sampleSize <= 0) return '';
+
+  let hash = 0;
+  const step = Math.max(1, Math.floor(base64.length / sampleSize));
+  for (let i = 0, seen = 0; i < base64.length && seen < sampleSize; i += step) {
+    hash = (hash * 31 + base64.charCodeAt(i)) | 0;
+    seen += 1;
+  }
+  return `${base64.length}:${hash}`;
+};
+
+const waitForReplaySettle = async (
+  operator: BaseOperator,
+  delayMs: number | undefined,
+  signal?: AbortSignal,
+) => {
+  const startedAt = Date.now();
+  const minimumDelayMs = clampDelay(delayMs);
+  const timeoutMs = minimumDelayMs + UI_STABLE_EXTRA_TIMEOUT_MS;
+  let lastFingerprint = '';
+  let stableCount = 0;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    if (signal?.aborted) return false;
+
+    await sleep(
+      Math.min(UI_STABLE_POLL_MS, timeoutMs - (Date.now() - startedAt)),
+    );
+    if (signal?.aborted) return false;
+
+    const snapshot = await operator.screenshot().catch((error) => {
+      logger.warn('[replayByMemory] Failed to sample screenshot:', error);
+      return null;
+    });
+    if (!snapshot?.base64) {
+      continue;
+    }
+
+    const fingerprint = fingerprintScreenshot(snapshot.base64);
+    if (fingerprint && fingerprint === lastFingerprint) {
+      stableCount += 1;
+      if (
+        stableCount >= UI_STABLE_REQUIRED_COUNT &&
+        Date.now() - startedAt >= minimumDelayMs
+      ) {
+        return true;
+      }
+    } else {
+      lastFingerprint = fingerprint;
+      stableCount = 1;
+    }
+  }
+
+  return !signal?.aborted;
 };
 
 // Token overlap ratio between two text strings (Jaccard-like)
@@ -258,12 +330,18 @@ export const verifyReplayResult = async (
     const settings = SettingStore.getStore();
     onProgress('thinking', '正在截图，调用 VLM 验证任务结果...');
 
-    // 优先使用传入的截图，否则尝试自行截取
     if (options?.screenshotBase64) {
       screenshot = { base64: options.screenshotBase64 };
     } else {
       const captured = await captureFeishuWindow();
       if (captured) screenshot = { base64: captured.base64 };
+    }
+
+    if (!screenshot) {
+      const msg = '截图失败，无法验证任务结果，默认视为完成';
+      logger.warn('[verifyReplayResult]', msg);
+      onProgress('done', msg);
+      return { ok: true, reason: msg, screenshotBase64: undefined };
     }
 
     const currentA11y = await queryAccessibilityTree({}).catch(() => null);
@@ -276,7 +354,7 @@ export const verifyReplayResult = async (
       return {
         ok: true,
         reason: msg,
-        screenshotBase64: screenshot?.base64,
+        screenshotBase64: screenshot.base64,
         a11ySnapshot: currentA11yText,
       };
     }
@@ -288,7 +366,6 @@ export const verifyReplayResult = async (
 
     const lang = settings.language ?? 'en';
     const isChinese = lang === 'zh';
-
     const a11ySection = isChinese
       ? currentA11yText
         ? `## 当前无障碍树\n\`\`\`\n${currentA11yText.slice(0, 2000)}\n\`\`\``
@@ -316,7 +393,7 @@ ${a11ySection}
 
 若截图中可以看到任务已完成的明确证据（如消息已发送、操作已生效），则 "completed": true。
 若截图中任务明显未完成或出现错误，则 "completed": false。`
-      : `You are a GUI automation task verifier. The agent has finished replaying a set of steps. Based on the current screenshot and accessibility tree, judge whether the following task has been successfully completed.
+      : `You are a GUI automation task verifier. The agent has finished a set of steps. Based on the current screenshot and accessibility tree, judge whether the following task has been successfully completed.
 
 ## Task
 ${instruction}
@@ -335,17 +412,13 @@ Answer with a JSON object only — no markdown, no explanation:
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
       {
         role: 'user',
-        content: screenshot
-          ? [
-              { type: 'text', text: prompt },
-              {
-                type: 'image_url',
-                image_url: {
-                  url: `data:image/jpeg;base64,${screenshot.base64}`,
-                },
-              },
-            ]
-          : prompt,
+        content: [
+          { type: 'text', text: prompt },
+          {
+            type: 'image_url',
+            image_url: { url: `data:image/jpeg;base64,${screenshot.base64}` },
+          },
+        ],
       },
     ];
 
@@ -375,7 +448,7 @@ Answer with a JSON object only — no markdown, no explanation:
     return {
       ok: parsed.completed,
       reason: parsed.reason,
-      screenshotBase64: screenshot?.base64,
+      screenshotBase64: screenshot.base64,
       a11ySnapshot: currentA11yText,
     };
   } catch (e) {
@@ -434,7 +507,6 @@ export const replayByMemory = async ({
     const parsedPrediction = toPrediction(step);
 
     try {
-      const stepStart = Date.now();
       const executeOutput = await operator.execute({
         prediction: JSON.stringify(step),
         parsedPrediction,
@@ -444,10 +516,18 @@ export const replayByMemory = async ({
         factors: [1, 1],
       });
 
-      // Ensure at least 1s between steps so the UI can catch up
-      const elapsed = Date.now() - stepStart;
-      if (elapsed < 1000) {
-        await sleep(1000 - elapsed);
+      const settled = await waitForReplaySettle(
+        operator,
+        step.delayAfterMs,
+        signal,
+      );
+      if (!settled) {
+        return {
+          ok: false,
+          aborted: true,
+          failStep: i,
+          reason: 'Replay aborted',
+        };
       }
 
       if (isExecuteFailed(executeOutput)) {

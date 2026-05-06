@@ -319,35 +319,31 @@ async function getFeishuWindowBounds(): Promise<{
   height: number;
 } | null> {
   try {
-    // 使用PowerShell查找飞书窗口位置
+    // Find the Feishu main window by process name to avoid matching other
+    // Chromium-based windows (e.g. our own Electron widget/main window).
+    // Use MainWindowHandle from Get-Process — .NET sets this to the largest
+    // top-level window with a title, which is the Feishu main window.
     const script = `
       Add-Type @"
       using System;
       using System.Runtime.InteropServices;
       public class Win32 {
-        [DllImport("user32.dll")]
-        public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
-        [DllImport("user32.dll")]
-        public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
-        public struct RECT {
-          public int Left;
-          public int Top;
-          public int Right;
-          public int Bottom;
-        }
+        [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+        public struct RECT { public int Left, Top, Right, Bottom; }
       }
 "@
-      $hWnd = [Win32]::FindWindow("Chrome_WidgetWin_1", $null)
-      if ($hWnd -eq [IntPtr]::Zero) {
-        $hWnd = [Win32]::FindWindow("Lark", $null)
-      }
-      if ($hWnd -eq [IntPtr]::Zero) {
-        Write-Output "NOT_FOUND"
-        exit
-      }
+      $procs = Get-Process -Name "Feishu" -ErrorAction SilentlyContinue
+      if (-not $procs) { $procs = Get-Process -Name "Lark" -ErrorAction SilentlyContinue }
+      if (-not $procs) { Write-Output "NOT_FOUND"; exit }
+
+      $hWnd = ($procs | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1).MainWindowHandle
+      if (-not $hWnd -or $hWnd -eq 0) { Write-Output "NOT_FOUND"; exit }
+
       $rect = New-Object Win32+RECT
       [Win32]::GetWindowRect($hWnd, [ref]$rect) | Out-Null
-      Write-Output "$($rect.Left),$($rect.Top),$($rect.Right - $rect.Left),$($rect.Bottom - $rect.Top)"
+      $w = $rect.Right - $rect.Left
+      $h = $rect.Bottom - $rect.Top
+      Write-Output "$($rect.Left),$($rect.Top),$w,$h"
     `;
 
     const { stdout } = await execFileAsync(

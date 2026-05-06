@@ -197,11 +197,21 @@ class RecordingService {
   }
 
   private async pushStepWithEvidence(
-    step: Omit<MemoryStep, 'screenshotBase64' | 'a11ySnapshot'>,
+    step: Omit<
+      MemoryStep,
+      'screenshotBase64' | 'screenshotWithMarker' | 'a11ySnapshot'
+    >,
   ) {
+    const start = step.timing?.start ?? Date.now();
     const evidence = await this.getRuntimeStepEvidence();
+    const end = Date.now();
     this.pushStep({
       ...step,
+      timing: step.timing ?? {
+        start,
+        end,
+        cost: end - start,
+      },
       screenshotBase64: evidence.screenshotBase64,
       a11ySnapshot: undefined,
     });
@@ -273,12 +283,14 @@ class RecordingService {
           action_inputs: { start_box: this.normalizeBox(e.x, e.y) },
           thought: '',
           reflection: null,
+          timing: { start: now, end: now, cost: 0 },
         });
       });
     });
 
     uIOhook.on('wheel', (e) => {
       if (!this.active || this.isStopping) return;
+      const now = Date.now();
       this.enqueueAction(async () => {
         await this.flushTextBuffer();
         await this.pushStepWithEvidence({
@@ -290,6 +302,7 @@ class RecordingService {
           },
           thought: '',
           reflection: null,
+          timing: { start: now, end: now, cost: 0 },
         });
       });
     });
@@ -328,6 +341,7 @@ class RecordingService {
       if (e.metaKey) parts.push('meta');
       const keyName = KEYCODE_TO_NAME[e.keycode] ?? `key${e.keycode}`;
       parts.push(keyName);
+      const now = Date.now();
 
       this.enqueueAction(async () => {
         await this.flushTextBuffer();
@@ -336,6 +350,7 @@ class RecordingService {
           action_inputs: { key: parts.join('+') },
           thought: '',
           reflection: null,
+          timing: { start: now, end: now, cost: 0 },
         });
       });
     });
@@ -371,6 +386,19 @@ class RecordingService {
 
     const settings = SettingStore.getStore();
     const instructionEmbedding = await embedInstruction(instruction);
+    const stepsWithTimeline = recordingSteps.map((step, index) => {
+      const currentEnd = step.timing?.end ?? step.timing?.start;
+      const nextStart = recordingSteps[index + 1]?.timing?.start;
+      return {
+        ...step,
+        delayAfterMs:
+          typeof currentEnd === 'number' &&
+          typeof nextStart === 'number' &&
+          nextStart > currentEnd
+            ? nextStart - currentEnd
+            : step.delayAfterMs,
+      };
+    });
 
     const now = Date.now();
     AgentMemoryStore.save({
@@ -380,7 +408,7 @@ class RecordingService {
       instructionEmbedding,
       operator: settings.operator,
       source: 'manual',
-      steps: recordingSteps,
+      steps: stepsWithTimeline,
       startA11ySnapshot: this.startA11ySnapshot,
       successMeta: {
         createdAt: now,

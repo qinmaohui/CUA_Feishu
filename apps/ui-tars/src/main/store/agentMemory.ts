@@ -8,6 +8,12 @@ export interface MemoryStep {
   action_inputs: Record<string, unknown>;
   thought: string;
   reflection: string | null;
+  timing?: {
+    start: number;
+    end: number;
+    cost: number;
+  };
+  delayAfterMs?: number;
   screenshotBase64?: string;
   screenshotWithMarker?: string;
   a11ySnapshot?: string;

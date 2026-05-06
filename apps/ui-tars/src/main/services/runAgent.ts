@@ -76,7 +76,7 @@ const getRecentA11yFromMessages = (
 const createMemoryReplayMessage = (step: MemoryStep): ConversationWithSoM => ({
   from: 'gpt',
   value: `${MEMORY_REPLAY_PREFIX} ${step.thought || step.action_type}`,
-  timing: { start: Date.now(), end: Date.now(), cost: 0 },
+  timing: step.timing ?? { start: Date.now(), end: Date.now(), cost: 0 },
   screenshotBase64: step.screenshotBase64,
   screenshotBase64WithElementMarker: step.screenshotWithMarker,
   a11ySnapshot: step.a11ySnapshot,
@@ -695,6 +695,7 @@ When deciding where to click or type:
   const finalState = getState();
   if (finalState.status === StatusEnum.END) {
     const steps: MemoryStep[] = [];
+    const actionMessageIndexes: number[] = [];
     for (let i = 0; i < finalState.messages.length; i += 1) {
       const conv = finalState.messages[i];
       const parsed = conv.predictionParsed ?? [];
@@ -714,10 +715,27 @@ When deciding where to click or type:
           action_inputs: (p.action_inputs ?? {}) as Record<string, unknown>,
           thought: p.thought ?? '',
           reflection: p.reflection ?? null,
+          timing: conv.timing,
           screenshotBase64: conv.screenshotBase64,
           screenshotWithMarker: conv.screenshotBase64WithElementMarker,
           a11ySnapshot: conv.a11ySnapshot ?? recentA11y,
         });
+        actionMessageIndexes.push(i);
+      }
+    }
+
+    for (let i = 0; i < steps.length; i += 1) {
+      const currentMessage = finalState.messages[actionMessageIndexes[i]];
+      const nextMessage = finalState.messages[actionMessageIndexes[i + 1]];
+      const currentEnd =
+        currentMessage?.timing?.end ?? currentMessage?.timing?.start;
+      const nextStart = nextMessage?.timing?.start;
+      if (
+        typeof currentEnd === 'number' &&
+        typeof nextStart === 'number' &&
+        nextStart > currentEnd
+      ) {
+        steps[i].delayAfterMs = nextStart - currentEnd;
       }
     }
 
