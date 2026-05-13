@@ -15,3 +15,4 @@ scripts/merge-yml/*.yml
 .mcp*_token
 /logs
 /apps/ui-tars/data/feishuImages
+/presentation-output
