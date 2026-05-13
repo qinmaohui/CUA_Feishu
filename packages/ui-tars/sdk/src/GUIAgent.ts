@@ -75,6 +75,7 @@ export class GUIAgent<T extends Operator> extends BaseGUIAgent<
       onError,
       retry = {},
       maxLoopCount = MAX_LOOP_COUNT,
+      systemPromptResolver,
     } = this.config;
 
     const currentTime = Date.now();
@@ -211,6 +212,19 @@ export class GUIAgent<T extends Operator> extends BaseGUIAgent<
         let end = Date.now();
 
         if (isValidImage) {
+          if (systemPromptResolver) {
+            const resolvedSystemPrompt = await systemPromptResolver({
+              screenshotBase64: snapshot.base64,
+              loopCnt,
+            }).catch((error) => {
+              logger.error('[GUIAgent] systemPromptResolver error', error);
+              return data.systemPrompt;
+            });
+            if (resolvedSystemPrompt) {
+              data.systemPrompt = resolvedSystemPrompt;
+            }
+          }
+
           data.conversations.push({
             from: 'human',
             value: IMAGE_PLACEHOLDER,

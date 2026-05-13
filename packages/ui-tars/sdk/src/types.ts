@@ -96,6 +96,10 @@ export interface GUIAgentConfig<TOperator> {
 
   // ===== Optional =====
   systemPrompt?: string;
+  systemPromptResolver?: (ctx: {
+    screenshotBase64: string;
+    loopCnt: number;
+  }) => Promise<string>;
   signal?: AbortSignal;
   onData?: (params: { data: GUIAgentData }) => void;
   onError?: (params: { data: GUIAgentData; error: GUIAgentError }) => void;
