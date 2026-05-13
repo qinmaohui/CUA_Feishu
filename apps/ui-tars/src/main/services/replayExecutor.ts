@@ -12,6 +12,7 @@ import { sleep } from '@ui-tars/shared/utils';
 import { queryAccessibilityTree } from './getDom';
 import { captureFeishuWindow } from './feishuAnnotation';
 import { SettingStore } from '@main/store/setting';
+import { getScreenSize } from '@main/utils/screen';
 
 type ReplayResult = {
   ok: boolean;
@@ -22,10 +23,6 @@ type ReplayResult = {
 
 const MIN_REPLAY_DELAY_MS = 1000;
 const MAX_REPLAY_DELAY_MS = 8000;
-const UI_STABLE_POLL_MS = 400;
-const UI_STABLE_REQUIRED_COUNT = 2;
-const UI_STABLE_SAMPLE_SIZE = 2000;
-const UI_STABLE_EXTRA_TIMEOUT_MS = 3000;
 
 const toPrediction = (step: MemoryStep): PredictionParsed => ({
   action_type: step.action_type,
@@ -34,20 +31,32 @@ const toPrediction = (step: MemoryStep): PredictionParsed => ({
   reflection: step.reflection,
 });
 
-const getScreenContext = async (operator: BaseOperator) => {
-  const snapshot = await operator.screenshot();
-  const image = nativeImage.createFromDataURL(
-    `data:image/jpeg;base64,${snapshot.base64}`,
-  );
-  const size = image.getSize();
-  if (!size.width || !size.height) {
-    throw new Error('Failed to parse screenshot size for replay context');
+const stripBase64Prefix = (base64: string) =>
+  base64.replace(/^data:image\/\w+;base64,/, '');
+
+const getReplayScreenContext = (memorySteps: MemoryStep[]) => {
+  const savedScreenshot = memorySteps.find(
+    (step) => !!step.screenshotBase64,
+  )?.screenshotBase64;
+  if (savedScreenshot) {
+    const image = nativeImage.createFromBuffer(
+      Buffer.from(stripBase64Prefix(savedScreenshot), 'base64'),
+    );
+    const size = image.getSize();
+    if (size.width && size.height) {
+      return {
+        width: size.width,
+        height: size.height,
+        scaleFactor: 1,
+      };
+    }
   }
 
+  const { physicalSize, scaleFactor } = getScreenSize();
   return {
-    width: size.width,
-    height: size.height,
-    scaleFactor: snapshot.scaleFactor || 1,
+    width: physicalSize.width,
+    height: physicalSize.height,
+    scaleFactor,
   };
 };
 
@@ -65,61 +74,11 @@ const clampDelay = (delayMs?: number) => {
   return Math.min(Math.max(delayMs, MIN_REPLAY_DELAY_MS), MAX_REPLAY_DELAY_MS);
 };
 
-const fingerprintScreenshot = (base64: string) => {
-  const sampleSize = Math.min(UI_STABLE_SAMPLE_SIZE, base64.length);
-  if (sampleSize <= 0) return '';
-
-  let hash = 0;
-  const step = Math.max(1, Math.floor(base64.length / sampleSize));
-  for (let i = 0, seen = 0; i < base64.length && seen < sampleSize; i += step) {
-    hash = (hash * 31 + base64.charCodeAt(i)) | 0;
-    seen += 1;
-  }
-  return `${base64.length}:${hash}`;
-};
-
 const waitForReplaySettle = async (
-  operator: BaseOperator,
   delayMs: number | undefined,
   signal?: AbortSignal,
 ) => {
-  const startedAt = Date.now();
-  const minimumDelayMs = clampDelay(delayMs);
-  const timeoutMs = minimumDelayMs + UI_STABLE_EXTRA_TIMEOUT_MS;
-  let lastFingerprint = '';
-  let stableCount = 0;
-
-  while (Date.now() - startedAt < timeoutMs) {
-    if (signal?.aborted) return false;
-
-    await sleep(
-      Math.min(UI_STABLE_POLL_MS, timeoutMs - (Date.now() - startedAt)),
-    );
-    if (signal?.aborted) return false;
-
-    const snapshot = await operator.screenshot().catch((error) => {
-      logger.warn('[replayByMemory] Failed to sample screenshot:', error);
-      return null;
-    });
-    if (!snapshot?.base64) {
-      continue;
-    }
-
-    const fingerprint = fingerprintScreenshot(snapshot.base64);
-    if (fingerprint && fingerprint === lastFingerprint) {
-      stableCount += 1;
-      if (
-        stableCount >= UI_STABLE_REQUIRED_COUNT &&
-        Date.now() - startedAt >= minimumDelayMs
-      ) {
-        return true;
-      }
-    } else {
-      lastFingerprint = fingerprint;
-      stableCount = 1;
-    }
-  }
-
+  await sleep(clampDelay(delayMs));
   return !signal?.aborted;
 };
 
@@ -490,7 +449,7 @@ export const replayByMemory = async ({
     };
   }
 
-  const { width, height, scaleFactor } = await getScreenContext(operator);
+  const { width, height, scaleFactor } = getReplayScreenContext(memorySteps);
 
   for (let i = 0; i < memorySteps.length; i += 1) {
     if (signal?.aborted) {
@@ -516,11 +475,7 @@ export const replayByMemory = async ({
         factors: [1, 1],
       });
 
-      const settled = await waitForReplaySettle(
-        operator,
-        step.delayAfterMs,
-        signal,
-      );
+      const settled = await waitForReplaySettle(step.delayAfterMs, signal);
       if (!settled) {
         return {
           ok: false,
