@@ -20,6 +20,7 @@ import { useSession } from '@renderer//hooks/useSession';
 import { NavHistory } from './nav-history';
 import { NavMemories } from './nav-memories';
 import { NavBatchTest } from './nav-batch-test';
+import { NavUIMap } from './nav-ui-map';
 import { NavSettings } from './nav-footer';
 import { UITarsHeader } from './nav-header';
 
@@ -169,6 +170,7 @@ export function AppSidebar({ ...props }: ComponentProps<typeof Sidebar>) {
             onSessionDelete={onSessionDelete}
           />
           <NavMemories onReplay={handleReplay} />
+          <NavUIMap onClick={() => navigate('/ui-map')} />
           <NavBatchTest onClick={() => navigate('/batch-test')} />
         </SidebarContent>
         <SidebarFooter className="p-0">

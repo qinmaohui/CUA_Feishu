@@ -13,6 +13,7 @@ import { settingRoute } from './setting';
 import { agentMemoryRoute } from './agentMemory';
 import { recordingRoute } from './recording';
 import { batchTestRoute } from './batchTest';
+import { uiMapRoute } from './uiMap';
 
 const t = initIpc.create();
 
@@ -27,6 +28,7 @@ export const ipcRoutes = t.router({
   ...agentMemoryRoute,
   ...recordingRoute,
   ...batchTestRoute,
+  ...uiMapRoute,
 });
 export type Router = typeof ipcRoutes;
 

@@ -50,10 +50,23 @@ import {
   checkReplayScreenState,
   verifyReplayResult,
 } from './replayExecutor';
+import { UIMapStore } from '@main/store/uiMap';
+import { localizeUIMapNode } from './uiMapLocalize';
+import {
+  buildPreviousActionAssessmentPrompt,
+  buildCurrentPageKnowledgePrompt,
+  extractExperienceUsedRefs,
+  observePendingAction,
+  pendingActionFromPrediction,
+  promoteNodeExperienceFromTrace,
+  type PendingUIMapAction,
+  type UIMapRunTraceItem,
+} from './uiMapExperience';
 
 const A11Y_CONTEXT_PREFIX = '[A11Y_CONTEXT]';
 const VERIFY_CONCLUSION_PREFIX = '[\u9a8c\u8bc1\u7ed3\u8bba]';
 const MEMORY_REPLAY_PREFIX = '[\u8bb0\u5fc6\u91cd\u653e]';
+const USER_INSTRUCTION_MARKER = '## User Instruction';
 
 type MessageEvidence = Partial<
   Pick<
@@ -89,6 +102,20 @@ const createMemoryReplayMessage = (step: MemoryStep): ConversationWithSoM => ({
     },
   ],
 });
+
+const insertBeforeUserInstruction = (prompt: string, addition: string) => {
+  if (!addition.trim()) return prompt;
+  const insertIndex = prompt.lastIndexOf(USER_INSTRUCTION_MARKER);
+  if (insertIndex < 0) {
+    return prompt + addition;
+  }
+  return (
+    prompt.slice(0, insertIndex) +
+    addition +
+    (addition.endsWith('\n') ? '' : '\n') +
+    prompt.slice(insertIndex)
+  );
+};
 
 export const runAgent = async (
   setState: (state: AppState) => void,
@@ -126,6 +153,13 @@ export const runAgent = async (
   const language = settings.language ?? 'en';
 
   logger.info('settings.operator', settings.operator);
+
+  const uiMapTrace: UIMapRunTraceItem[] = [];
+  let currentUIMapNodeId: string | undefined;
+  let currentUIMapShotHash: string | undefined;
+  let currentUIMapExperienceCatalog = new Map<string, string>();
+  let pendingUIMapAction: PendingUIMapAction | null = null;
+  let baseSystemPrompt = '';
 
   const handleData: GUIAgentConfig<NutJSElectronOperator>['onData'] = async ({
     data,
@@ -225,13 +259,35 @@ export const runAgent = async (
       return conversations;
     });
 
+    const conversationsWithExperience: ConversationWithSoM[] =
+      conversationsWithSoM.map((conv) => {
+        if (!conv.predictionParsed?.length) return conv;
+
+        return {
+          ...conv,
+          predictionParsed: conv.predictionParsed.map((prediction) => {
+            const refs = extractExperienceUsedRefs(
+              [prediction.thought, prediction.reflection]
+                .filter(Boolean)
+                .join('\n'),
+              currentUIMapExperienceCatalog,
+            );
+            return refs.length
+              ? ({ ...prediction, experienceUsed: refs } as PredictionParsed)
+              : prediction;
+          }),
+        };
+      });
+
     const {
       screenshotBase64,
       predictionParsed,
       screenshotContext,
       screenshotBase64WithElementMarker,
       ...rest
-    } = conversationsWithSoM?.[conversationsWithSoM.length - 1] || {};
+    } =
+      conversationsWithExperience?.[conversationsWithExperience.length - 1] ||
+      {};
     logger.info(
       '[onGUIAgentData] ======data======\n',
       predictionParsed,
@@ -240,6 +296,33 @@ export const runAgent = async (
       status,
       '\n========',
     );
+
+    if (predictionParsed?.length && currentUIMapNodeId) {
+      if (pendingUIMapAction) {
+        observePendingAction({
+          pending: pendingUIMapAction,
+          targetNodeId: currentUIMapNodeId,
+          afterShotHash: currentUIMapShotHash,
+          reflection: predictionParsed[0]?.reflection ?? null,
+          nextThought: predictionParsed[0]?.thought ?? null,
+          instruction: instructions,
+          trace: uiMapTrace,
+        });
+        pendingUIMapAction = null;
+      }
+
+      const nextAction = predictionParsed
+        .map((prediction) =>
+          pendingActionFromPrediction({
+            sourceNodeId: currentUIMapNodeId,
+            sourceShotHash: currentUIMapShotHash,
+            prediction,
+            experienceCatalog: currentUIMapExperienceCatalog,
+          }),
+        )
+        .find(Boolean);
+      pendingUIMapAction = nextAction ?? null;
+    }
 
     if (
       settings.operator === Operator.LocalComputer &&
@@ -255,8 +338,8 @@ export const runAgent = async (
       status,
       restUserData,
       // Append new conversations; skip the final SDK "end" callback which sends conversations: []
-      ...(conversationsWithSoM.length > 0
-        ? { messages: [...getState().messages, ...conversationsWithSoM] }
+      ...(conversationsWithExperience.length > 0
+        ? { messages: [...getState().messages, ...conversationsWithExperience] }
         : {}),
     });
   };
@@ -340,6 +423,14 @@ When deciding where to click or type:
 1. If the target appears in [A11Y_CONTEXT], copy its point1000 value directly and use it in click(point='...').
 2. Do not re-calculate or re-derive coordinates from the screenshot.
 3. Only if the target is missing from [A11Y_CONTEXT], fall back to screenshot-based estimation.
+`;
+
+  const uiMapReflectionGuidance = `
+## UI Map Reflection
+When a "Previous Action Assessment" section is present, the current screenshot is the evidence for the previous action.
+Use the required Reflection block to judge that previous action and extract a short reusable experience when one exists.
+Do not add extra screenshots or extra model calls for this assessment.
+When "Current Page Knowledge" includes experience ids like [P1] or [E2.1], explicitly state whether the next action uses them. Put this at the beginning of Thought or Action_Summary: Experience_Used: P1=<tip text>, E2.1=<tip text>. Use Experience_Used: none if no experience influenced the action.
 `;
 
   // Memory: search for similar past successes before starting
@@ -627,14 +718,54 @@ When deciding where to click or type:
     logger.warn('[runAgent] Failed to capture start A11y snapshot:', e);
   }
 
-  const systemPrompt =
-    getSpByModelVersion(modelVersion, language, operatorType) +
-    a11yGuidance +
-    memoryGuidance;
+  const systemPrompt = insertBeforeUserInstruction(
+    getSpByModelVersion(modelVersion, language, operatorType),
+    a11yGuidance + uiMapReflectionGuidance + memoryGuidance,
+  );
+  baseSystemPrompt = systemPrompt;
 
   const guiAgent = new GUIAgent({
     model: modelConfig,
     systemPrompt: systemPrompt,
+    systemPromptResolver: async ({ screenshotBase64 }) => {
+      const localized = await localizeUIMapNode({
+        screenshotBase64,
+        a11yText: getLatestTaskA11yContextSnapshot(),
+        allowVlmFallback: true,
+      }).catch((error) => {
+        logger.warn('[UIMap] localize from prompt resolver failed:', error);
+        return null;
+      });
+
+      if (!localized?.node) {
+        pendingUIMapAction = null;
+        currentUIMapNodeId = undefined;
+        currentUIMapShotHash = undefined;
+        currentUIMapExperienceCatalog = new Map();
+        return baseSystemPrompt;
+      }
+
+      currentUIMapNodeId = localized.node.id;
+      currentUIMapShotHash = localized.visualHash;
+
+      const knowledge = buildCurrentPageKnowledgePrompt({
+        node: localized.node,
+      });
+      currentUIMapExperienceCatalog = knowledge.experienceCatalog;
+      if (knowledge.text) {
+        UIMapStore.incrementExperienceHits({
+          nodeIds: knowledge.nodeId ? [knowledge.nodeId] : [],
+          edgeIds: knowledge.edgeIds,
+        });
+        logger.info('[UIMap] Injecting page knowledge for:', localized.node.id);
+      }
+
+      return insertBeforeUserInstruction(
+        baseSystemPrompt,
+        knowledge.text +
+          buildPreviousActionAssessmentPrompt(pendingUIMapAction),
+      );
+    },
     logger,
     signal: abortController?.signal,
     operator: operator!,
@@ -690,6 +821,8 @@ When deciding where to click or type:
     });
 
   logger.info('[runAgent Totoal cost]: ', (Date.now() - startTime) / 1000, 's');
+
+  promoteNodeExperienceFromTrace(uiMapTrace);
 
   // Memory: save successful run as reusable memory
   const finalState = getState();
