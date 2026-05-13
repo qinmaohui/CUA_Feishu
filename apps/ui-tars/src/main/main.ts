@@ -37,6 +37,7 @@ import {
   readAnnotationImage,
   llmAnnotateUI,
 } from './services/feishuAnnotation';
+import { resizeWidgetWindow } from './window/ScreenMarker';
 
 const { isProd } = env;
 
@@ -192,6 +193,13 @@ const registerIPCHandlers = (
     const sanitizedState = sanitizeState(state as Record<string, unknown>);
     windowManager.broadcast('subscribe', sanitizedState);
   });
+
+  ipcMain.on(
+    'widget:resize',
+    (_, size: { width?: number; height?: number }) => {
+      resizeWidgetWindow(size);
+    },
+  );
 
   const unsubscribe = store.subscribe((state: unknown) =>
     ipcMain.emit('subscribe', state),

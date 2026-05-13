@@ -15,6 +15,8 @@ const electronHandler = {
   ipcRenderer: {
     invoke: (channel: string, ...args: unknown[]) =>
       ipcRenderer.invoke(channel, ...args),
+    send: (channel: string, ...args: unknown[]) =>
+      ipcRenderer.send(channel, ...args),
     sendMessage(channel: Channels, ...args: unknown[]) {
       ipcRenderer.send(channel, ...args);
     },

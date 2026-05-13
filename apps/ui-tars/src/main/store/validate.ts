@@ -44,6 +44,7 @@ export const PresetSchema = z
 
     // Feishu Annotation
     autoAnnotation: z.boolean().optional(),
+    recordingFriendlyWidget: z.boolean().optional(),
 
     // Report Settings
     reportStorageBaseUrl: z.string().url().optional(),

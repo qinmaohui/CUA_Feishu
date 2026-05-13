@@ -2,7 +2,7 @@
  * Copyright (c) 2025 Bytedance, Inc. and its affiliates.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useStore } from '@renderer/hooks/useStore';
 import {
   Monitor,
@@ -40,7 +40,65 @@ interface Action {
   reflection?: string;
   thought?: string;
   query?: string;
+  experienceUsed?: ExperienceUsedRef[];
 }
+
+interface ExperienceUsedRef {
+  id: string;
+  text: string;
+}
+
+type PredictionWithExperience = {
+  experienceUsed?: ExperienceUsedRef[];
+};
+
+const normalizeExperienceRef = (ref: ExperienceUsedRef): ExperienceUsedRef => ({
+  id: ref.id
+    .trim()
+    .replace(/^\[|\]$/g, '')
+    .toUpperCase(),
+  text: ref.text.trim(),
+});
+
+const extractExperienceUsed = (...values: Array<string | undefined>) => {
+  const text = values.filter(Boolean).join('\n');
+  const match = text.match(/Experience_Used\s*:\s*([^\n;]+)/i);
+  const value = match?.[1]?.trim();
+  if (!value || /^(none|null|n\/a)$/i.test(value)) return [];
+
+  const refs: ExperienceUsedRef[] = [];
+  const seen = new Set<string>();
+  const pattern =
+    /\[?\b([PE]\d+(?:\.\d+)?)\b\]?(?:\s*(?:=|:|：|-)\s*([^,\n;]+))?/gi;
+  let refMatch: RegExpExecArray | null;
+  while ((refMatch = pattern.exec(value))) {
+    const id = refMatch[1].toUpperCase();
+    if (seen.has(id)) continue;
+    refs.push({
+      id,
+      text: (refMatch[2] ?? '').trim().replace(/^["'“”‘’]+|["'“”‘’]+$/g, ''),
+    });
+    seen.add(id);
+  }
+
+  return refs;
+};
+
+const getExperienceUsedRefs = (
+  item: PredictionWithExperience,
+  ...values: Array<string | undefined>
+) => {
+  if (item.experienceUsed?.length) {
+    return item.experienceUsed.map(normalizeExperienceRef);
+  }
+  return extractExperienceUsed(...values);
+};
+
+const stripExperienceUsed = (value?: string) =>
+  (value ?? '')
+    .replace(/^\s*Experience_Used\s*:\s*[^\n;]+;?\s*/i, '')
+    .replace(/\n\s*Experience_Used\s*:\s*[^\n;]+;?/gi, '')
+    .trim();
 
 const getOperatorIcon = (type: string) => {
   switch (type) {
@@ -77,8 +135,10 @@ const PHASE_TEXT: Record<MemoryPhaseStatus, string> = {
 };
 
 const MemoryPhasesBlock = ({ phases }: { phases: MemoryPhase[] }) => (
-  <div className="mt-3 mb-2 rounded-lg border border-gray-200 bg-gray-50/80 px-3 py-2">
-    <div className="mb-1.5 text-xs font-semibold text-gray-500">记忆检索</div>
+  <div className="rounded-md border border-gray-200 bg-gray-50/80 px-2.5 py-2">
+    <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+      Memory
+    </div>
     <div className="flex flex-col gap-1">
       {phases.map((phase) => (
         <div key={phase.id} className="flex flex-col gap-0.5">
@@ -87,7 +147,7 @@ const MemoryPhasesBlock = ({ phases }: { phases: MemoryPhase[] }) => (
             <span className={PHASE_TEXT[phase.status]}>{phase.label}</span>
           </div>
           {phase.detail && (
-            <div className="ml-5 truncate text-xs text-gray-400">
+            <div className="ml-5 break-words text-[11px] text-gray-400">
               {phase.detail}
             </div>
           )}
@@ -131,7 +191,7 @@ const RecordingBlock = ({
   const latestSteps = steps.slice(-3).reverse();
 
   return (
-    <div className="mt-3 mb-2 rounded-lg border border-red-200 bg-red-50/80 px-3 py-2">
+    <div className="rounded-md border border-red-200 bg-red-50/80 px-2.5 py-2">
       <div className="mb-1 flex items-center justify-between">
         <span className="flex items-center gap-1.5 text-xs font-semibold text-red-600">
           <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
@@ -171,7 +231,7 @@ const ReplayProgressBlock = ({
 }: {
   progress: { current: number; total: number; currentStep: MemoryStep | null };
 }) => (
-  <div className="mt-2 mb-2 rounded-lg border border-blue-200 bg-blue-50/80 px-3 py-2">
+  <div className="rounded-md border border-blue-200 bg-blue-50/80 px-2.5 py-2">
     <div className="mb-1 flex items-center justify-between">
       <span className="text-xs font-semibold text-blue-600">正在重放操作</span>
       <span className="text-xs text-blue-500">
@@ -185,7 +245,7 @@ const ReplayProgressBlock = ({
       />
     </div>
     {progress.currentStep && (
-      <div className="truncate text-xs text-gray-600">
+      <div className="break-words text-xs text-gray-600">
         <span className="font-medium text-gray-700">
           {progress.currentStep.action_type}
         </span>
@@ -217,9 +277,7 @@ const VerifyBlock = ({ verify }: { verify: VerifyProgress }) => {
       : 'text-red-600';
 
   return (
-    <div
-      className={`mt-2 mb-2 rounded-lg border ${borderColor} ${bgColor} px-3 py-2`}
-    >
+    <div className={`rounded-md border ${borderColor} ${bgColor} px-2.5 py-2`}>
       <div className="mb-1 flex items-center gap-1.5">
         {isThinking ? (
           <Loader2 className="h-3 w-3 animate-spin text-amber-500" />
@@ -232,9 +290,105 @@ const VerifyBlock = ({ verify }: { verify: VerifyProgress }) => {
           {isThinking ? '验证中...' : isDone ? '验证通过' : '验证未通过'}
         </span>
       </div>
-      <div className="text-xs leading-relaxed text-gray-500">
+      <div className="break-words text-xs leading-relaxed text-gray-500">
         {verify.message}
       </div>
+    </div>
+  );
+};
+
+const CompactText = ({
+  label,
+  value,
+  tone = 'gray',
+}: {
+  label: string;
+  value?: string;
+  tone?: 'gray' | 'blue';
+}) => {
+  if (!value) return null;
+  return (
+    <div
+      className={`rounded-md px-2 py-1.5 ${
+        tone === 'blue' ? 'bg-blue-50/80' : 'bg-gray-50/80'
+      }`}
+    >
+      <div
+        className={`mb-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+          tone === 'blue' ? 'text-blue-500' : 'text-gray-400'
+        }`}
+      >
+        {label}
+      </div>
+      <div className="whitespace-pre-wrap break-words text-xs leading-relaxed text-gray-600">
+        {value}
+      </div>
+    </div>
+  );
+};
+
+const ActionTimeline = ({ actions }: { actions: Action[] }) => {
+  if (!actions.length) return null;
+
+  return (
+    <div className="space-y-2">
+      {actions.map((action, idx) => {
+        const ActionIcon = ActionIconMap[action.type] || MousePointerClick;
+        return (
+          <div
+            key={idx}
+            className="rounded-md border border-gray-200 bg-white/80 px-2.5 py-2"
+          >
+            {!!action.type && (
+              <div className="flex min-w-0 items-center gap-2">
+                {!!ActionIcon && (
+                  <ActionIcon
+                    className="h-3.5 w-3.5 shrink-0 text-gray-500"
+                    strokeWidth={2}
+                  />
+                )}
+                <span className="shrink-0 text-xs font-semibold text-gray-800">
+                  {action.type}
+                </span>
+                {action.input && (
+                  <span className="truncate text-xs text-gray-500">
+                    {action.input}
+                  </span>
+                )}
+              </div>
+            )}
+            {!!action.experienceUsed?.length && (
+              <div className="mt-1 rounded bg-emerald-50 px-2 py-1 text-[11px] text-emerald-700">
+                <div className="mb-0.5 font-semibold">Used experience</div>
+                <div className="space-y-0.5">
+                  {action.experienceUsed.map((ref) => (
+                    <div
+                      key={ref.id}
+                      className="grid grid-cols-[auto_minmax(0,1fr)] gap-1.5"
+                    >
+                      <span className="font-mono font-semibold">
+                        [{ref.id}]
+                      </span>
+                      <span className="break-words">
+                        {ref.text || 'No content captured'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="mt-2 space-y-1.5">
+              <CompactText label="Reflection" value={action.reflection} />
+              <CompactText label="Thought" value={action.thought} />
+              <CompactText
+                label="Human query"
+                value={action.query}
+                tone="blue"
+              />
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 };
@@ -252,6 +406,7 @@ const Widget = () => {
     verifyProgress,
   } = useStore();
   const { settings } = useSetting();
+  const widgetRef = useRef<HTMLDivElement>(null);
 
   const currentOperator = settings.operator || 'nutjs';
   const [actions, setActions] = useState<Action[]>([]);
@@ -287,13 +442,21 @@ const Widget = () => {
           .filter(Boolean)
           .join(' ');
 
+        const itemWithExperience = item as typeof item &
+          PredictionWithExperience;
+
         return {
           action: 'Action',
           type: item.action_type,
           cost: lastMessage.timing?.cost,
           input: input || undefined,
-          reflection: item.reflection || '',
-          thought: item.thought,
+          reflection: stripExperienceUsed(item.reflection || ''),
+          thought: stripExperienceUsed(item.thought),
+          experienceUsed: getExperienceUsedRefs(
+            itemWithExperience,
+            item.thought,
+            item.reflection || undefined,
+          ),
         };
       }) || [];
 
@@ -327,6 +490,31 @@ const Widget = () => {
     toDisplayShortcut(settings.stopShortcut) ||
     (isWin ? 'Ctrl+Esc' : 'Cmd+Esc');
 
+  useEffect(() => {
+    const element = widgetRef.current;
+    if (!element) return;
+
+    let frame = 0;
+    const reportSize = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const rect = element.getBoundingClientRect();
+        window.electron.ipcRenderer.send('widget:resize', {
+          width: Math.ceil(rect.width),
+          height: Math.ceil(element.scrollHeight),
+        });
+      });
+    };
+
+    reportSize();
+    const observer = new ResizeObserver(reportSize);
+    observer.observe(element);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, []);
+
   const statusMeta = (() => {
     switch (status) {
       case StatusEnum.RUNNING:
@@ -351,7 +539,8 @@ const Widget = () => {
 
   return (
     <div
-      className="h-100 w-100 overflow-hidden rounded-[10px] border-gray-300 bg-white/90 p-4 dark:bg-gray-800/90"
+      ref={widgetRef}
+      className="w-100 rounded-[10px] border-gray-300 bg-white/90 p-3 dark:bg-gray-800/90"
       style={{ borderWidth: isWin ? '1px' : '0' }}
     >
       <div className="draggable-area flex">
@@ -369,75 +558,25 @@ const Widget = () => {
         <span>Agent status: {statusMeta.label}</span>
       </div>
 
-      {!!errorMsg && <div>{errorMsg}</div>}
+      <div className="widget-content mt-2 space-y-2">
+        {!!errorMsg && (
+          <div className="rounded-md border border-red-200 bg-red-50/80 px-2.5 py-2 text-xs text-red-600">
+            {errorMsg}
+          </div>
+        )}
+        {!!isRecording && (
+          <RecordingBlock
+            instruction={recordingInstruction}
+            steps={recordingSteps ?? []}
+          />
+        )}
+        {!!memoryPhases && <MemoryPhasesBlock phases={memoryPhases} />}
+        {!!replayProgress && <ReplayProgressBlock progress={replayProgress} />}
+        {!!verifyProgress && <VerifyBlock verify={verifyProgress} />}
+        {!errorMsg && <ActionTimeline actions={actions} />}
+      </div>
 
-      {!!isRecording && (
-        <RecordingBlock
-          instruction={recordingInstruction}
-          steps={recordingSteps ?? []}
-        />
-      )}
-      {!!memoryPhases && <MemoryPhasesBlock phases={memoryPhases} />}
-      {!!replayProgress && <ReplayProgressBlock progress={replayProgress} />}
-      {!!verifyProgress && <VerifyBlock verify={verifyProgress} />}
-
-      {!!actions.length && !errorMsg && (
-        <div className="mt-4 max-h-70 overflow-scroll hide_scroll_bar">
-          {actions.map((action, idx) => {
-            const ActionIcon = ActionIconMap[action.type] || MousePointerClick;
-            return (
-              <div key={idx}>
-                {!!action.type && (
-                  <>
-                    <div className="flex items-baseline">
-                      <div className="text-lg font-medium">{action.action}</div>
-                    </div>
-                    <div className="flex items-center text-sm text-gray-500">
-                      {!!ActionIcon && (
-                        <ActionIcon
-                          className="mr-1.5 h-4 w-4"
-                          strokeWidth={2}
-                        />
-                      )}
-                      <span className="text-gray-600">{action.type}</span>
-                      {action.input && (
-                        <span className="truncate break-all text-gray-600">
-                          {action.input}
-                        </span>
-                      )}
-                    </div>
-                  </>
-                )}
-                {!!action.reflection && (
-                  <>
-                    <div className="mt-2 text-lg font-medium">Reflection</div>
-                    <div className="break-all text-sm text-gray-500">
-                      {action.reflection}
-                    </div>
-                  </>
-                )}
-                {!!action.thought && (
-                  <>
-                    <div className="mt-2 text-lg font-medium">Thought</div>
-                    <div className="mb-4 break-all text-sm text-gray-500">
-                      {action.thought}
-                    </div>
-                  </>
-                )}
-                {!!action.query && (
-                  <>
-                    <div className="text-lg font-medium">Human Query</div>
-                    <div className="break-all text-sm text-gray-500">
-                      {action.query}
-                    </div>
-                  </>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-      <div className="shortcut-panel absolute right-4 bottom-4">
+      <div className="shortcut-panel mt-2 shrink-0">
         <div className="shortcut-row">
           <span className="shortcut-label">Pause</span>
           <span className="shortcut-key">{pauseShortcut}</span>

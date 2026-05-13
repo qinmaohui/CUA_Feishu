@@ -73,9 +73,11 @@ export class NutJSElectronOperator extends NutJSOperator {
       scaleFactor,
     );
 
-    hideWidgetForScreenshot();
-    // Small delay to ensure the widget is fully hidden before capture
-    await sleep(50);
+    const widgetHidden = hideWidgetForScreenshot();
+    // Small delay only when the widget is actually hidden before capture.
+    if (widgetHidden) {
+      await sleep(50);
+    }
 
     try {
       const sources = await desktopCapturer.getSources({
@@ -111,7 +113,7 @@ export class NutJSElectronOperator extends NutJSOperator {
         scaleFactor,
       };
     } finally {
-      showWidgetAfterScreenshot();
+      showWidgetAfterScreenshot(widgetHidden);
     }
   }
 

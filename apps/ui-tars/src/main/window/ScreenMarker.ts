@@ -124,6 +124,13 @@ class ScreenMarker {
     this.registerWidgetShortcuts();
   }
 
+  refreshWidgetCaptureMode() {
+    if (!this.widgetWindow || this.widgetWindow.isDestroyed()) {
+      return;
+    }
+    this.showWidgetWindow();
+  }
+
   showScreenWaterFlow() {
     if (this.screenWaterFlow) {
       return;
@@ -220,14 +227,25 @@ class ScreenMarker {
     this.screenWaterFlow = null;
   }
 
-  hideWidgetForScreenshot() {
-    if (this.widgetWindow && !this.widgetWindow.isDestroyed()) {
-      this.widgetWindow.hide();
+  hideWidgetForScreenshot(): boolean {
+    const settings = SettingStore.getStore();
+    if (!settings.recordingFriendlyWidget) {
+      return false;
     }
+
+    if (
+      this.widgetWindow &&
+      !this.widgetWindow.isDestroyed() &&
+      this.widgetWindow.isVisible()
+    ) {
+      this.widgetWindow.hide();
+      return true;
+    }
+    return false;
   }
 
-  showWidgetAfterScreenshot() {
-    if (this.widgetWindow && !this.widgetWindow.isDestroyed()) {
+  showWidgetAfterScreenshot(wasHidden = true) {
+    if (wasHidden && this.widgetWindow && !this.widgetWindow.isDestroyed()) {
       this.widgetWindow.show();
     }
   }
@@ -238,6 +256,31 @@ class ScreenMarker {
     this.widgetWindow = null;
   }
 
+  resizeWidgetWindow(size: { width?: number; height?: number }) {
+    if (!this.widgetWindow || this.widgetWindow.isDestroyed()) {
+      return;
+    }
+
+    const primaryDisplay = screen.getPrimaryDisplay();
+    const {
+      x,
+      y,
+      width: screenWidth,
+      height: screenHeight,
+    } = primaryDisplay.workArea;
+    const rightOffset = 32;
+    const bottomOffset = 96;
+    const width = Math.max(320, Math.ceil(size.width ?? 400));
+    const height = Math.max(120, Math.ceil(size.height ?? 220));
+
+    this.widgetWindow.setBounds({
+      width,
+      height,
+      x: Math.floor(x + screenWidth - width - rightOffset),
+      y: Math.max(y, Math.floor(y + screenHeight - height - bottomOffset)),
+    });
+  }
+
   showWidgetWindow() {
     if (this.widgetWindow) {
       this.widgetWindow.close();
@@ -245,18 +288,27 @@ class ScreenMarker {
     }
 
     const primaryDisplay = screen.getPrimaryDisplay();
-    const { width: screenWidth, height: screenHeight } = primaryDisplay.size;
+    const {
+      x,
+      y,
+      width: screenWidth,
+      height: screenHeight,
+    } = primaryDisplay.workArea;
+    const initialWidth = 400;
+    const initialHeight = 220;
+    const settings = SettingStore.getStore();
+    const recordingFriendly = !!settings.recordingFriendlyWidget;
 
     this.widgetWindow = new BrowserWindow({
-      width: 400,
-      height: 400,
+      width: initialWidth,
+      height: initialHeight,
       transparent: true,
       frame: false,
       alwaysOnTop: true,
-      skipTaskbar: true,
-      focusable: false,
-      resizable: false,
-      type: 'toolbar',
+      skipTaskbar: !recordingFriendly,
+      focusable: recordingFriendly,
+      resizable: true,
+      ...(recordingFriendly ? {} : { type: 'toolbar' as const }),
       visualEffectState: 'active', // macOS only
       webPreferences: {
         preload: path.join(__dirname, '../preload/index.js'),
@@ -265,13 +317,14 @@ class ScreenMarker {
       },
     });
 
-    this.widgetWindow.setFocusable(false);
+    this.widgetWindow.setFocusable(recordingFriendly);
+    this.widgetWindow.setContentProtection(!recordingFriendly);
     // Enable mouse passthrough — most of the window area lets clicks through,
     // but interactive elements (buttons) with pointer-events: auto still capture.
     this.widgetWindow.setIgnoreMouseEvents(true, { forward: true });
     this.widgetWindow.setPosition(
-      Math.floor(screenWidth - 400 - 32),
-      Math.floor(screenHeight - 400 - 32 - 64),
+      Math.floor(x + screenWidth - initialWidth - 32),
+      Math.floor(y + screenHeight - initialHeight - 96),
     );
 
     if (!app.isPackaged && env.rendererUrl) {
@@ -439,11 +492,11 @@ export const hideWidgetWindow = () => {
 };
 
 export const hideWidgetForScreenshot = () => {
-  ScreenMarker.getInstance().hideWidgetForScreenshot();
+  return ScreenMarker.getInstance().hideWidgetForScreenshot();
 };
 
-export const showWidgetAfterScreenshot = () => {
-  ScreenMarker.getInstance().showWidgetAfterScreenshot();
+export const showWidgetAfterScreenshot = (wasHidden = true) => {
+  ScreenMarker.getInstance().showWidgetAfterScreenshot(wasHidden);
 };
 
 export const showScreenWaterFlow = () => {
@@ -456,6 +509,17 @@ export const hideScreenWaterFlow = () => {
 
 export const refreshWidgetShortcuts = () => {
   ScreenMarker.getInstance().refreshWidgetShortcuts();
+};
+
+export const refreshWidgetCaptureMode = () => {
+  ScreenMarker.getInstance().refreshWidgetCaptureMode();
+};
+
+export const resizeWidgetWindow = (size: {
+  width?: number;
+  height?: number;
+}) => {
+  ScreenMarker.getInstance().resizeWidgetWindow(size);
 };
 
 export const closeOverlay = () => {

@@ -27,24 +27,28 @@ Button * {
   pointer-events: auto;
 }
 
+.widget-content {
+  pointer-events: auto;
+}
+
 .shortcut-panel {
   pointer-events: none;
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 180px;
-  padding: 8px 10px;
-  border-radius: 10px;
+  flex-direction: row;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
   border: 1px solid rgba(156, 163, 175, 0.45);
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.72);
 }
 
 .shortcut-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  font-size: 12px;
+  gap: 6px;
+  font-size: 11px;
+  min-width: 0;
 }
 
 .shortcut-label {
@@ -54,6 +58,7 @@ Button * {
 .shortcut-key {
   color: #111827;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .hide_scroll_bar::-webkit-scrollbar {

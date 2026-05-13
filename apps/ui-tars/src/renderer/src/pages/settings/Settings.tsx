@@ -17,6 +17,7 @@ import { Button } from '@renderer/components/ui/button';
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -33,6 +34,7 @@ import { ScrollArea } from '@renderer/components/ui/scroll-area';
 import { Input } from '@renderer/components/ui/input';
 import { DragArea } from '@renderer/components/Common/drag';
 import { BROWSER_OPERATOR } from '@renderer/const';
+import { Switch } from '@renderer/components/ui/switch';
 
 import { PresetImport } from './PresetImport';
 import { Tabs, TabsList, TabsTrigger } from '@renderer/components/ui/tabs';
@@ -57,6 +59,7 @@ const formSchema = z.object({
   searchEngineForBrowser: z.nativeEnum(SearchEngineForSettings),
   reportStorageBaseUrl: z.string().optional(),
   utioBaseUrl: z.string().optional(),
+  recordingFriendlyWidget: z.boolean().optional(),
 });
 
 const SECTIONS = {
@@ -127,6 +130,7 @@ export default function Settings() {
       reportStorageBaseUrl: '',
       searchEngineForBrowser: SearchEngineForSettings.GOOGLE,
       utioBaseUrl: '',
+      recordingFriendlyWidget: false,
       ...settings,
     },
   });
@@ -143,6 +147,7 @@ export default function Settings() {
         searchEngineForBrowser: settings.searchEngineForBrowser,
         reportStorageBaseUrl: settings.reportStorageBaseUrl,
         utioBaseUrl: settings.utioBaseUrl,
+        recordingFriendlyWidget: settings.recordingFriendlyWidget,
       });
     }
   }, [settings, form]);
@@ -552,6 +557,28 @@ export default function Settings() {
                 className="space-y-6 ml-1 mr-4"
               >
                 <h2 className="text-lg font-medium">{SECTIONS.general}</h2>
+                <FormField
+                  control={form.control}
+                  name="recordingFriendlyWidget"
+                  render={({ field }) => (
+                    <FormItem className="flex items-center justify-between rounded-lg border p-3">
+                      <div className="pr-4">
+                        <FormLabel>Recording Friendly Widget</FormLabel>
+                        <FormDescription>
+                          Show the Widget in screen recordings. When enabled,
+                          screenshots hide it briefly; when disabled, the Widget
+                          is protected from recordings and screenshots.
+                        </FormDescription>
+                      </div>
+                      <FormControl>
+                        <Switch
+                          checked={!!field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
                 <Button
                   variant="outline"
                   type="button"

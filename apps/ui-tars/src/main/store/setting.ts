@@ -31,6 +31,7 @@ export const DEFAULT_SETTING: LocalStore = {
   stopShortcut: 'CommandOrControl+Escape',
   operator: Operator.LocalComputer,
   autoAnnotation: false,
+  recordingFriendlyWidget: false,
   reportStorageBaseUrl: '',
   utioBaseUrl: '',
 };

@@ -3,10 +3,13 @@ import { Button } from '@renderer/components/ui/button';
 import { RefreshCcw } from 'lucide-react';
 import { api } from '@/renderer/src/api';
 import { toast } from 'sonner';
+import { useSetting } from '@renderer/hooks/useSetting';
+import { Switch } from '@renderer/components/ui/switch';
 
 import { REPO_OWNER, REPO_NAME } from '@main/shared/constants';
 
 export const GeneralSettings = () => {
+  const { settings, updateSetting } = useSetting();
   const [updateLoading, setUpdateLoading] = useState(false);
   const [updateDetail, setUpdateDetail] = useState<{
     currentVersion: string;
@@ -44,7 +47,26 @@ export const GeneralSettings = () => {
   };
 
   return (
-    <>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between rounded-lg border p-3">
+        <div className="pr-4">
+          <div className="text-sm font-medium">Recording Friendly Widget</div>
+          <div className="text-sm text-muted-foreground">
+            Show the Widget in screen recordings. When enabled, screenshots hide
+            it briefly; when disabled, the Widget is protected from recordings
+            and screenshots.
+          </div>
+        </div>
+        <Switch
+          checked={!!settings.recordingFriendlyWidget}
+          onCheckedChange={(checked) =>
+            updateSetting({
+              ...settings,
+              recordingFriendlyWidget: checked,
+            })
+          }
+        />
+      </div>
       <Button
         variant="outline"
         type="button"
@@ -74,6 +96,6 @@ export const GeneralSettings = () => {
           </a>
         </div>
       )}
-    </>
+    </div>
   );
 };

@@ -6,7 +6,10 @@ import { ipcMain } from 'electron';
 import { SettingStore } from '../store/setting';
 import { logger } from '../logger';
 import { LocalStore } from '@main/store/validate';
-import { refreshWidgetShortcuts } from '@main/window/ScreenMarker';
+import {
+  refreshWidgetCaptureMode,
+  refreshWidgetShortcuts,
+} from '@main/window/ScreenMarker';
 
 export function registerSettingsHandlers() {
   /**
@@ -51,6 +54,7 @@ export function registerSettingsHandlers() {
 
     SettingStore.setStore(settings);
     refreshWidgetShortcuts();
+    refreshWidgetCaptureMode();
   });
 
   /**
